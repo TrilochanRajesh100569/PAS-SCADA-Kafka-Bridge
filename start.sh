@@ -159,18 +159,17 @@ for f in 00-namespace.yaml 10-rabbitmq-configmap.yaml 20-rabbitmq-secret.yaml \
 done
 ok "scada manifests applied"
 
-# ── 8. Patch imagePullPolicy + bridge probe timings ─────────────────────
-# imagePullPolicy=IfNotPresent  → use loaded local images instead of pulling :latest
-# Bridge probes need ~3min headroom — Spring Boot + Camel boot takes ~100s on minikube.
-log "Patching imagePullPolicy and bridge probe timings"
+# ── 8. Patch imagePullPolicy on locally-built deployments ───────────────
+# imagePullPolicy=IfNotPresent → use the image we just `minikube image load`-ed
+# instead of trying to pull from a remote registry. Without this, pods
+# stuck in ImagePullBackOff because :latest defaults to imagePullPolicy:Always.
+#
+# (Probe timings are now baked into the manifests — see tms/k8s/deployment.yaml
+# and external-scada/k8s/40-rabbitmq-deployment.yaml. No probe patch needed.)
+log "Patching imagePullPolicy on locally-built deployments"
 kubectl -n pinkline patch deploy pas-scada-bridge --type=json \
-  -p='[
-    {"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"IfNotPresent"},
-    {"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/initialDelaySeconds","value":180},
-    {"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/failureThreshold","value":5},
-    {"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/initialDelaySeconds","value":120},
-    {"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/failureThreshold","value":10}
-  ]' 2>/dev/null \
+  -p='[{"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"IfNotPresent"}]' \
+  2>/dev/null \
   || kubectl -n pinkline patch deploy pas-scada-bridge --type=json \
        -p='[{"op":"add","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"IfNotPresent"}]' \
        2>/dev/null || true
@@ -180,7 +179,7 @@ kubectl -n scada patch deploy scada-api --type=json \
   || kubectl -n scada patch deploy scada-api --type=json \
        -p='[{"op":"add","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"IfNotPresent"}]' \
        2>/dev/null || true
-ok "pull policies + probe timings patched"
+ok "imagePullPolicy patched"
 
 # Force a rollout restart NOW so pods pick up freshly-loaded images with
 # correct probe timings already in place. Triggers redeploy of the

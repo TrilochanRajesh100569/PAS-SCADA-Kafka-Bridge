@@ -293,6 +293,9 @@ Open http://localhost:15672 (thiru/password) → Queues tab → `scada.tms.alarm
 |---|---|
 | RabbitMQ pod stuck Pending | PVC issue. `kubectl -n scada describe pvc`. Often: `minikube addons enable storage-provisioner`. |
 | **RabbitMQ pod restarts once with "Liveness probe failed: rabbitmq-diagnostics -q ping timed out after 15s"** | Cosmetic on slow PCs — RabbitMQ takes >15s to become diagnosable on first boot. Pod stabilizes after one restart. Move on if it ends up `1/1 Running`. |
+| **RabbitMQ pod keeps restarting (3+ times) with the same liveness-probe-timed-out-after-15s error** | If you're seeing this on a current checkout, the manifest already has generous timeouts (60s liveness, 30s readiness — see `external-scada/k8s/40-rabbitmq-deployment.yaml`). On an OLD pod that was created before the manifest fix, just `kubectl -n scada rollout restart deploy/rabbitmq` to recreate with current values. After ~2 min the new pod stays `1/1 Running`. Then `kubectl -n pinkline rollout restart deploy/pas-scada-bridge` so it reconnects to a healthy RabbitMQ. |
+| **Bridge keeps showing DOWN in monitor / restarts every ~20 min with `Readiness probe failed: context deadline exceeded`** | Same root cause — probe timeout was 1s, `/actuator/health` blocks while polling Camel/JMS health indicators on slower hosts. Manifest now has `timeoutSeconds: 10` (see `tms/k8s/deployment.yaml`). On an old pod: `kubectl -n pinkline rollout restart deploy/pas-scada-bridge`. |
+| **scada-api decryption fails (decrypt_fail++) after a TMS message arrives at /api/received** | Container image lagging behind source. The bridge encrypts → base64 → publishes; scada-api's `decrypt_payload` auto-detects base64 and decodes if needed. If you see `decrypt_fail` increasing, confirm the running pod's `app.py` matches `external-scada/scada-api/app.py` (`kubectl -n scada exec deploy/scada-api -- sed -n '207,225p' /app/app.py`). If different, rebuild + reload + roll out: `docker build -t ghcr.io/thirunavukkarasuthangaraj/pas-scada-api:latest external-scada/scada-api/`, `minikube ssh -- "docker rmi -f ghcr.io/thirunavukkarasuthangaraj/pas-scada-api:latest"`, `minikube image load ghcr.io/thirunavukkarasuthangaraj/pas-scada-api:latest`, `kubectl -n scada rollout restart deploy/scada-api`. |
 | scada-api logs: MQTT auth failure (`rc=4`) | Wrong creds. Confirm `external-scada/k8s/60-scada-api-secret.yaml` has `MQTT_USER=thiru` / `MQTT_PASS=password` (NOT `admin/admin`). Reapply, restart deploy. |
 | `mqtt_connected: false` in `/api/status` | RabbitMQ MQTT plugin not enabled. `kubectl -n scada exec deploy/rabbitmq -- rabbitmq-plugins list \| grep mqtt`. Should show `[E*]`. If not: `kubectl -n scada exec deploy/rabbitmq -- rabbitmq-plugins enable rabbitmq_mqtt`. |
 | **Method B curl pod errors with `EPERM uv_spawn powershell.exe`** | Antivirus blocked it (seen with K7 Total Security flagging the spawned PS as "Suspicious Program ID 41030"). Use Method A (`rabbitmqadmin` inside the pod) instead — it runs entirely inside Kubernetes and avoids spawning a host process. |
@@ -309,27 +312,18 @@ Open http://localhost:15672 (thiru/password) → Queues tab → `scada.tms.alarm
 kubectl apply -f tms/k8s/overlay-minikube.yaml
 kubectl apply -f tms/k8s/deployment.yaml
 
-kubectl -n pinkline patch deploy pas-scada-bridge --type=json -p='[
-  {"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"IfNotPresent"},
-  {"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/initialDelaySeconds","value":180},
-  {"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/failureThreshold","value":5},
-  {"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/initialDelaySeconds","value":120},
-  {"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/failureThreshold","value":10}]'
+# Probe timings are baked into deployment.yaml (timeoutSeconds=10 + generous
+# initialDelays). The only thing left to patch is imagePullPolicy so the pod
+# uses the locally-loaded image instead of pulling :latest from a registry.
+kubectl -n pinkline patch deploy pas-scada-bridge --type=json \
+  -p='[{"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"IfNotPresent"}]'
 
 kubectl -n pinkline rollout status deploy/pas-scada-bridge --timeout=300s
 ```
 
-**PowerShell users — save the patch JSON to a file** (the inline form fails):
+**PowerShell users — save the patch JSON to a file** (PowerShell mangles the inline form):
 ```powershell
-@'
-[
-  {"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"IfNotPresent"},
-  {"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/initialDelaySeconds","value":180},
-  {"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/failureThreshold","value":5},
-  {"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/initialDelaySeconds","value":120},
-  {"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/failureThreshold","value":10}
-]
-'@ | Out-File -Encoding ascii $env:TEMP\bridge-patch.json
+'[{"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"IfNotPresent"}]' | Out-File -Encoding ascii $env:TEMP\bridge-patch.json
 kubectl -n pinkline patch deploy pas-scada-bridge --type=json --patch-file $env:TEMP\bridge-patch.json
 kubectl -n pinkline rollout status deploy/pas-scada-bridge --timeout=300s
 ```

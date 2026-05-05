@@ -58,6 +58,7 @@ $svcs = @(
   @{ns='pinkline'; svc='kafdrop';             ports='9000:9000'},
   @{ns='pinkline'; svc='kafka-connect';       ports='8083:8083'},
   @{ns='scada';    svc='rabbitmq-internal';   ports='15672:15672'},
+  @{ns='scada';    svc='rabbitmq-internal';   ports='1883:1883'},
   @{ns='scada';    svc='scada-api-internal';  ports='8091:8091'}
 )
 foreach ($s in $svcs) {

@@ -64,18 +64,25 @@ spec:
             - name: config
               mountPath: /etc/rabbitmq/rabbitmq.conf
               subPath: rabbitmq.conf
+          # NOTE: Probe timeouts intentionally generous.
+          # On slower machines (laptops, dev VMs, AV-inspected processes),
+          # `rabbitmq-diagnostics ping` regularly exceeds 15s on cold cache.
+          # The default tighter values caused a probe-kill loop where the
+          # broker was healthy but kept getting killed before it could answer.
           livenessProbe:
             exec:
               command: ["rabbitmq-diagnostics", "-q", "ping"]
-            initialDelaySeconds: 60
-            periodSeconds: 30
-            timeoutSeconds: 15
+            initialDelaySeconds: 120
+            periodSeconds: 60
+            timeoutSeconds: 60
+            failureThreshold: 5
           readinessProbe:
             exec:
               command: ["rabbitmq-diagnostics", "-q", "check_port_connectivity"]
-            initialDelaySeconds: 30
-            periodSeconds: 15
-            timeoutSeconds: 10
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            timeoutSeconds: 30
+            failureThreshold: 5
           resources:
             requests: { memory: "512Mi", cpu: "250m" }
             limits:   { memory: "1Gi",   cpu: "500m" }

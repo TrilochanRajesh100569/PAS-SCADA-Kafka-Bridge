@@ -75,20 +75,30 @@ spec:
           #     readOnly: true
 
           # ── Health checks ─────────────────────────────────
+          # NOTE: timeoutSeconds is generous (10s) because on slower hosts
+          # /actuator/health blocks while Camel/JMS health indicators query
+          # Artemis/Kafka/RabbitMQ. Default 1s is too aggressive and
+          # produced a probe-kill loop even while the bridge was healthy.
+          # initialDelaySeconds is 180/120 — Spring Boot + Camel cold start
+          # is ~100s and the bridge can't connect to RabbitMQ until the
+          # SCADA namespace is up.
           livenessProbe:
             httpGet:
               path: /actuator/health
               port: 8085
-            initialDelaySeconds: 30
+            initialDelaySeconds: 180
             periodSeconds: 30
-            failureThreshold: 3
+            timeoutSeconds: 10
+            failureThreshold: 5
 
           readinessProbe:
             httpGet:
               path: /actuator/health
               port: 8085
-            initialDelaySeconds: 20
+            initialDelaySeconds: 120
             periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 10
 
           resources:
             requests:
