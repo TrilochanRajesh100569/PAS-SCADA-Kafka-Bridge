@@ -1,6 +1,33 @@
 # ═══════════════════════════════════════════════════════════════════
 # Zookeeper — Kafka coordination (single node for this deployment)
+#
+# Persistent volumes for /var/lib/zookeeper/{data,log} are required:
+# without them, every pod restart generates a fresh cluster ID, and
+# Kafka (which DOES persist its cluster ID) refuses to start with
+# "InconsistentClusterIdException".
 # ═══════════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zookeeper-data
+  namespace: pinkline
+spec:
+  accessModes: [ "ReadWriteOnce" ]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zookeeper-log
+  namespace: pinkline
+spec:
+  accessModes: [ "ReadWriteOnce" ]
+  resources:
+    requests:
+      storage: 1Gi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -31,9 +58,21 @@ spec:
               value: "2181"
             - name: ZOOKEEPER_TICK_TIME
               value: "2000"
+          volumeMounts:
+            - name: zookeeper-data
+              mountPath: /var/lib/zookeeper/data
+            - name: zookeeper-log
+              mountPath: /var/lib/zookeeper/log
           resources:
             requests: { memory: "256Mi", cpu: "100m" }
             limits:   { memory: "512Mi", cpu: "250m" }
+      volumes:
+        - name: zookeeper-data
+          persistentVolumeClaim:
+            claimName: zookeeper-data
+        - name: zookeeper-log
+          persistentVolumeClaim:
+            claimName: zookeeper-log
 ---
 apiVersion: v1
 kind: Service

@@ -50,6 +50,7 @@ Re-run until everything shows `1/1 Running`.
 
 Copy this **whole block** into PowerShell and press Enter:
 
+
 ```powershell
 $svcs = @(
   @{ns='pinkline'; svc='pas-scada-monitor';   ports='8080:8080'},
@@ -108,7 +109,35 @@ morning when you re-run Step 2.
 | Some pod stuck `0/1 Running` for 5+ min | `kubectl -n pinkline rollout restart deploy/<name>` |
 | Bridge in `CrashLoopBackOff` | Bridge needs RabbitMQ. Check rabbitmq pod is `1/1 Running` first. Then restart bridge. |
 | Browser says "site can't be reached" on localhost:8080 | Port-forwards died. Re-run Step 4. |
+| Port-forward log shows "connection refused" | The pod restarted while the forward was open. Close that minimized window and re-run that line from Step 4. |
 | Artemis container missing | `& 'C:\Program Files\Docker\Docker\resources\bin\docker.exe' start artemis` |
+| Kafka pod in `Error` with `InconsistentClusterIdException` | See **Kafka cluster ID mismatch** below. |
 | Everything is wrong, nuke and restart | `& $env:USERPROFILE\minikube.exe stop` then start again |
+
+---
+
+## Kafka cluster ID mismatch (one-time recovery)
+
+If the kafka pod logs show `InconsistentClusterIdException`, kafka and
+zookeeper disagree on which cluster they belong to. With the PVC fix in
+`tms/k8s/20-zookeeper.yaml` this should not recur, but if you hit it
+once (e.g. on an older deployment), wipe kafka's stored cluster ID:
+
+```powershell
+kubectl -n pinkline scale deploy kafka --replicas=0
+kubectl -n pinkline scale deploy kafka-connect --replicas=0
+kubectl -n pinkline scale deploy pas-scada-bridge --replicas=0
+kubectl -n pinkline run kafka-wipe --rm -i --restart=Never --image=busybox `
+  --overrides='{\"spec\":{\"containers\":[{\"name\":\"w\",\"image\":\"busybox\",\"command\":[\"sh\",\"-c\",\"rm -rf /data/* /data/.[!.]* 2>/dev/null; echo done\"],\"volumeMounts\":[{\"name\":\"d\",\"mountPath\":\"/data\"}]}],\"volumes\":[{\"name\":\"d\",\"persistentVolumeClaim\":{\"claimName\":\"kafka-data\"}}]}}'
+kubectl -n pinkline scale deploy kafka --replicas=1
+# wait ~60s for kafka to be 1/1 Running, then:
+kubectl -n pinkline scale deploy kafka-connect --replicas=1
+kubectl -n pinkline scale deploy pas-scada-bridge --replicas=1
+kubectl -n pinkline delete job kafka-connect-register --ignore-not-found
+kubectl apply -f connect/k8s/40-job-register.yaml
+```
+
+Topic data is wiped, but topics auto-recreate and the bridge republishes
+fresh data from RabbitMQ. Safe for dev.
 
 For deeper issues, see `MANUAL-RUN.md` "If it fails" tables.
