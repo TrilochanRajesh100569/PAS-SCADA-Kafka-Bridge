@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}PAS-SCADA Live Demo{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="dot"></span>
+    <span class="brand-text">PAS-SCADA <b>Live Demo</b></span>
+  </div>
+
+  <nav class="tabs">
+    <a href="/"     class="tab {% if active=='monitor' %}active{% endif %}">🩺 Monitor</a>
+    <a href="/flow" class="tab {% if active=='flow'    %}active{% endif %}">⚡ Live Flow</a>
+  </nav>
+
+  <div class="status">
+    <span class="pill mode-{{ mode }}">
+      {% if mode == 'live' %}🔴 LIVE{% else %}🟣 SYNTHETIC{% endif %}
+    </span>
+    {% if bridge_url %}
+      <span class="muted small">→ {{ bridge_url }}</span>
+    {% endif %}
+    <span id="conn" class="pill conn-pending">connecting…</span>
+  </div>
+</header>
+
+<main>
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="footer">
+  <span id="msg-count">0 messages</span> received
+  &nbsp;·&nbsp;
+  <span id="last-time">—</span>
+  &nbsp;·&nbsp;
+  <a href="/healthz" class="muted">healthz</a>
+</footer>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

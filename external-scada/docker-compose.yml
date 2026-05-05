@@ -1,0 +1,76 @@
+# ════════════════════════════════════════════════════════════
+# PAS-SCADA-Kafka-Bridge — EXTERNAL VM (SCADA side)
+#
+# Runs on the external VM (same network as SCADA systems).
+# Contains: RabbitMQ (with MQTT plugin), SCADA API placeholder
+#
+# Internal VM's bridge connects here over the network.
+# Expose ports to the internal VM's subnet (firewall: 5672, 1883).
+#
+# Run:
+#   docker compose -f docker-compose.external.yml up -d
+# ════════════════════════════════════════════════════════════
+
+services:
+
+  # ── RabbitMQ (AMQP + MQTT + Web MQTT) ─────────────────────
+  # Bridge on internal VM publishes here via AMQP (5672).
+  # SCADA API subscribes via MQTT (1883) or AMQP.
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    container_name: pas-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5673:5672"      # AMQP — bridge on internal VM connects here (5672 taken by haproxy)
+      - "1884:1883"      # MQTT — SCADA API / devices subscribe (1883 taken by haproxy)
+      - "15672:15672"    # Management console
+      - "15675:15675"    # MQTT over WebSocket (browser SCADA viewer)
+    environment:
+      RABBITMQ_DEFAULT_USER: thiru
+      RABBITMQ_DEFAULT_PASS: password
+    command: >
+      bash -c "rabbitmq-plugins enable rabbitmq_mqtt rabbitmq_web_mqtt &&
+               rabbitmq-server"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+
+  # ── SCADA API (mock) ──────────────────────────────────────
+  # Subscribes to MQTT tms/scada/pas, decrypts AES-GCM payload,
+  # exposes received messages via HTTP.
+  #   Browse:   http://<ext-vm-ip>:8091/          (health + stats)
+  #             http://<ext-vm-ip>:8091/messages  (last 100 decrypted)
+  #             http://<ext-vm-ip>:8091/stream    (live SSE stream)
+  # Replace this with real SCADA API image when available.
+  scada-api:
+    build: ./scada-api
+    container_name: pas-scada-api
+    restart: unless-stopped          # auto-restart on crash or VM reboot
+    depends_on:
+      rabbitmq:
+        condition: service_healthy   # wait until RabbitMQ is actually ready
+    ports:
+      - "8091:8091"
+    environment:
+      MQTT_HOST: rabbitmq
+      MQTT_PORT: "1883"
+      MQTT_USER: thiru
+      MQTT_PASS: password
+      MQTT_TOPIC_IN:  "tms/scada/pas"
+      MQTT_TOPIC_OUT: "scada/tms/alarms"
+      SCADA_CREATOR_ID: "ScateX"
+      # Must match the AES key the bridge used to encrypt.
+      SCADA_AES_KEY: "k7Qh2NfT8vR0mC9aXy4pLwZbE3sG6uJtH1iKd5oArMw="
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request as r; r.urlopen(\"http://localhost:8091/api/status\").read()'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  rabbitmq-data:

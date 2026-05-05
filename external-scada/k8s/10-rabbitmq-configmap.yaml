@@ -1,0 +1,29 @@
+# ═══════════════════════════════════════════════════════════════════
+# RabbitMQ config — enables MQTT plugin + Web MQTT for browsers.
+# ═══════════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rabbitmq-config
+  namespace: scada
+data:
+  enabled_plugins: |
+    [rabbitmq_management,rabbitmq_mqtt,rabbitmq_web_mqtt].
+  rabbitmq.conf: |
+    # ── Listeners ────────────────────────────────────────────────
+    listeners.tcp.default            = 5672
+    management.tcp.port              = 15672
+    mqtt.listeners.tcp.default       = 1883
+    web_mqtt.tcp.port                = 15675
+
+    # ── MQTT defaults — used when client doesn't send credentials
+    mqtt.default_user                = thiru
+    mqtt.default_pass                = password
+    mqtt.allow_anonymous             = false
+    mqtt.vhost                       = /
+    mqtt.exchange                    = amq.topic
+
+    # ── Hardening ────────────────────────────────────────────────
+    loopback_users.guest             = true
+    disk_free_limit.absolute         = 500MB
+    heartbeat                        = 30

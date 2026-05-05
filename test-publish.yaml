@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: artemis-pub
+  namespace: pinkline
+spec:
+  restartPolicy: Never
+  containers:
+    - name: pub
+      image: apache/activemq-artemis:2.31.2
+      command: ["/bin/sh","-c"]
+      args:
+        - |
+          /opt/activemq-artemis/bin/artemis producer \
+            --url tcp://host.minikube.internal:61616 \
+            --user admin --password admin \
+            --destination topic://TMS.PISInfo \
+            --message-count 1 \
+            --message '<ATRTimeTable><dateTime>20260429T140000</dateTime><StartIndex>0</StartIndex><TotalCount>1</TotalCount><GraphID>42</GraphID><Trains><Tg><TTGUID>test-realtime-001</TTGUID><TripNo>678</TripNo><CTD lpid="101" tn="678"/><Evts F="3" Id="2201" As="3600" Ds="3660"/></Tg></Trains></ATRTimeTable>'

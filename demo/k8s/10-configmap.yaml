@@ -1,0 +1,13 @@
+# Demo app config — flip MODE to "live" once the bridge is reachable.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-config
+  namespace: pinkline
+data:
+  # synthetic = always works (default), live = real data from bridge + monitor
+  MODE:             "live"
+  BRIDGE_URL:       "http://pas-scada-bridge.pinkline.svc.cluster.local:8085"
+  MONITOR_URL:      "http://pas-scada-monitor.pinkline.svc.cluster.local:8080"
+  SYNTH_INTERVAL_S: "2.5"
+  HISTORY:          "100"

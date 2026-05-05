@@ -1,0 +1,163 @@
+# ══════════════════════════════════════════════════════════════
+# CD — Build Docker Images & Deploy to VMs
+#
+# Runs only on push to main (after CI passes).
+#
+# What it does:
+#   1. Builds Docker images for bridge + scada-api
+#   2. Pushes images to GitHub Container Registry (GHCR)
+#   3. SSHs into TMS VM  (10.4.0.23) → pulls + restarts bridge
+#   4. SSHs into SCADA VM (10.4.0.25) → pulls + restarts scada-api
+#
+# Required GitHub Secrets (Settings → Secrets → Actions):
+#   SSH_PRIVATE_KEY   — private key for both VMs
+#   TMS_VM_HOST       — e.g. 10.4.0.23
+#   SCADA_VM_HOST     — e.g. 10.4.0.25
+#   VM_USER           — SSH username on both VMs
+#   SCADA_AES_KEY     — Base64 AES-256 key for encryption
+# ══════════════════════════════════════════════════════════════
+
+name: CD — Build & Deploy
+
+on:
+  push:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  BRIDGE_IMAGE: ghcr.io/${{ github.repository_owner }}/pas-scada-bridge
+  SCADA_IMAGE:  ghcr.io/${{ github.repository_owner }}/pas-scada-api
+
+jobs:
+
+  # ── 1. Build & Push Docker images ───────────────────────────
+  build-and-push:
+    name: Build & Push Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Bridge
+      - name: Build & push bridge image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./tms
+          push: true
+          tags: |
+            ${{ env.BRIDGE_IMAGE }}:latest
+            ${{ env.BRIDGE_IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+
+      # SCADA API
+      - name: Build & push scada-api image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./external-scada/scada-api
+          push: true
+          tags: |
+            ${{ env.SCADA_IMAGE }}:latest
+            ${{ env.SCADA_IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+
+  # ── 2. Deploy bridge to TMS VM (10.4.0.23) ──────────────────
+  deploy-tms:
+    name: Deploy Bridge → TMS VM
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    environment: production
+
+    steps:
+      - name: Checkout (for docker-compose file)
+        uses: actions/checkout@v4
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add VM to known hosts
+        run: ssh-keyscan -H ${{ secrets.TMS_VM_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Copy docker-compose to TMS VM
+        run: |
+          scp tms/docker-compose.yml \
+            ${{ secrets.VM_USER }}@${{ secrets.TMS_VM_HOST }}:~/pas-bridge/docker-compose.yml
+
+      - name: Deploy on TMS VM
+        run: |
+          ssh ${{ secrets.VM_USER }}@${{ secrets.TMS_VM_HOST }} << 'EOF'
+            set -e
+            cd ~/pas-bridge
+
+            # Pull latest images
+            echo "${{ secrets.GITHUB_TOKEN }}" | \
+              docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            # Override image in compose to use GHCR image
+            export BRIDGE_IMAGE=${{ env.BRIDGE_IMAGE }}:${{ github.sha }}
+
+            docker compose pull bridge || true
+            docker compose up -d --no-deps bridge kafka zookeeper kafdrop
+
+            echo "Bridge deployed: ${{ github.sha }}"
+            docker ps --filter name=pas-scada-bridge --format "table {{.Names}}\t{{.Status}}"
+          EOF
+
+  # ── 3. Deploy SCADA API to SCADA VM (10.4.0.25) ─────────────
+  deploy-scada:
+    name: Deploy SCADA API → SCADA VM
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add VM to known hosts
+        run: ssh-keyscan -H ${{ secrets.SCADA_VM_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Copy docker-compose to SCADA VM
+        run: |
+          scp external-scada/docker-compose.yml \
+            ${{ secrets.VM_USER }}@${{ secrets.SCADA_VM_HOST }}:~/pas-scada/docker-compose.yml
+
+      - name: Deploy on SCADA VM
+        run: |
+          ssh ${{ secrets.VM_USER }}@${{ secrets.SCADA_VM_HOST }} << 'EOF'
+            set -e
+            cd ~/pas-scada
+
+            echo "${{ secrets.GITHUB_TOKEN }}" | \
+              docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            export SCADA_IMAGE=${{ env.SCADA_IMAGE }}:${{ github.sha }}
+
+            docker compose pull scada-api || true
+            docker compose up -d --no-deps scada-api rabbitmq
+
+            echo "SCADA API deployed: ${{ github.sha }}"
+            docker ps --filter name=scada --format "table {{.Names}}\t{{.Status}}"
+          EOF

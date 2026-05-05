@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pinkline
+  labels:
+    name: pinkline
+    vm: tms

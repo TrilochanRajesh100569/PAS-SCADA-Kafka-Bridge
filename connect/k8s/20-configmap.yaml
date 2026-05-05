@@ -1,0 +1,232 @@
+# Connector definitions, one config-only JSON per connector.
+#
+# Format: each "<name>.json" key holds the body of PUT /connectors/<name>/config.
+# (The connector name lives in the file key, not the JSON payload.)
+#
+# Five connectors total — full forward + reverse pipeline:
+#   tms-artemis-source        Artemis  ─►  Kafka tms.raw                       (Phase 2)
+#   tms-rabbitmq-sink         Kafka tms.scada.encrypted  ─►  RabbitMQ exchange (Phase 4)
+#   tms-mqtt-sink             Kafka tms.scada.encrypted  ─►  MQTT broker       (Phase 4)
+#   scada-rabbitmq-source     RabbitMQ queue  ─►  Kafka scada.tms.raw          (Phase 4)
+#   scada-artemis-sink        Kafka scada.tms.processed  ─►  Artemis           (Phase 4)
+#
+# Edit and re-apply, then re-run the registration Job to reconcile.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: connect-config
+  namespace: pinkline
+data:
+
+  # ── tms-artemis-source family (one connector per Artemis topic) ──
+  # Camel JMS kamelet only accepts one destinationName, so we register
+  # one connector per Artemis topic the bridge needs to drain. All four
+  # write into the same Kafka topic tms.raw so the downstream pipeline
+  # is unchanged.
+  tms-artemis-source.json: |
+    {
+      "connector.class": "org.apache.camel.kafkaconnector.jmspooledapacheartemissource.CamelJmspooledapacheartemissourceSourceConnector",
+      "tasks.max": "1",
+      "topics": "tms.raw",
+
+      "camel.kamelet.jms-pooled-apache-artemis-source.brokerURL": "tcp://host.minikube.internal:61616",
+      "camel.kamelet.jms-pooled-apache-artemis-source.destinationName": "TMS.PISInfo",
+      "camel.kamelet.jms-pooled-apache-artemis-source.destinationType": "topic",
+      "camel.kamelet.jms-pooled-apache-artemis-source.username": "${env:ARTEMIS_USER}",
+      "camel.kamelet.jms-pooled-apache-artemis-source.password": "${env:ARTEMIS_PASSWORD}",
+
+      "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+      "value.converter": "org.apache.kafka.connect.storage.StringConverter",
+
+      "errors.tolerance": "all",
+      "errors.log.enable": "true",
+      "errors.log.include.messages": "true",
+      "errors.deadletterqueue.topic.name": "dlq.connect.tms-artemis-source",
+      "errors.deadletterqueue.topic.replication.factor": "1",
+      "errors.deadletterqueue.context.headers.enable": "true",
+      "errors.retry.timeout": "600000",
+      "errors.retry.delay.max.ms": "30000"
+    }
+
+  tms-artemis-source-trafficreport.json: |
+    {
+      "connector.class": "org.apache.camel.kafkaconnector.jmspooledapacheartemissource.CamelJmspooledapacheartemissourceSourceConnector",
+      "tasks.max": "1",
+      "topics": "tms.raw",
+
+      "camel.kamelet.jms-pooled-apache-artemis-source.brokerURL": "tcp://host.minikube.internal:61616",
+      "camel.kamelet.jms-pooled-apache-artemis-source.destinationName": "RCS.E2K.TMS.TrafficReportClient",
+      "camel.kamelet.jms-pooled-apache-artemis-source.destinationType": "topic",
+      "camel.kamelet.jms-pooled-apache-artemis-source.username": "${env:ARTEMIS_USER}",
+      "camel.kamelet.jms-pooled-apache-artemis-source.password": "${env:ARTEMIS_PASSWORD}",
+
+      "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+      "value.converter": "org.apache.kafka.connect.storage.StringConverter",
+
+      "errors.tolerance": "all",
+      "errors.log.enable": "true",
+      "errors.log.include.messages": "true",
+      "errors.deadletterqueue.topic.name": "dlq.connect.tms-artemis-source",
+      "errors.deadletterqueue.topic.replication.factor": "1",
+      "errors.deadletterqueue.context.headers.enable": "true",
+      "errors.retry.timeout": "600000",
+      "errors.retry.delay.max.ms": "30000"
+    }
+
+  tms-artemis-source-tsinfo.json: |
+    {
+      "connector.class": "org.apache.camel.kafkaconnector.jmspooledapacheartemissource.CamelJmspooledapacheartemissourceSourceConnector",
+      "tasks.max": "1",
+      "topics": "tms.raw",
+
+      "camel.kamelet.jms-pooled-apache-artemis-source.brokerURL": "tcp://host.minikube.internal:61616",
+      "camel.kamelet.jms-pooled-apache-artemis-source.destinationName": "TSInfo",
+      "camel.kamelet.jms-pooled-apache-artemis-source.destinationType": "topic",
+      "camel.kamelet.jms-pooled-apache-artemis-source.username": "${env:ARTEMIS_USER}",
+      "camel.kamelet.jms-pooled-apache-artemis-source.password": "${env:ARTEMIS_PASSWORD}",
+
+      "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+      "value.converter": "org.apache.kafka.connect.storage.StringConverter",
+
+      "errors.tolerance": "all",
+      "errors.log.enable": "true",
+      "errors.log.include.messages": "true",
+      "errors.deadletterqueue.topic.name": "dlq.connect.tms-artemis-source",
+      "errors.deadletterqueue.topic.replication.factor": "1",
+      "errors.deadletterqueue.context.headers.enable": "true",
+      "errors.retry.timeout": "600000",
+      "errors.retry.delay.max.ms": "30000"
+    }
+
+  tms-artemis-source-routeinfo.json: |
+    {
+      "connector.class": "org.apache.camel.kafkaconnector.jmspooledapacheartemissource.CamelJmspooledapacheartemissourceSourceConnector",
+      "tasks.max": "1",
+      "topics": "tms.raw",
+
+      "camel.kamelet.jms-pooled-apache-artemis-source.brokerURL": "tcp://host.minikube.internal:61616",
+      "camel.kamelet.jms-pooled-apache-artemis-source.destinationName": "RCS.E2K.TMS.RouteInfo",
+      "camel.kamelet.jms-pooled-apache-artemis-source.destinationType": "topic",
+      "camel.kamelet.jms-pooled-apache-artemis-source.username": "${env:ARTEMIS_USER}",
+      "camel.kamelet.jms-pooled-apache-artemis-source.password": "${env:ARTEMIS_PASSWORD}",
+
+      "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+      "value.converter": "org.apache.kafka.connect.storage.StringConverter",
+
+      "errors.tolerance": "all",
+      "errors.log.enable": "true",
+      "errors.log.include.messages": "true",
+      "errors.deadletterqueue.topic.name": "dlq.connect.tms-artemis-source",
+      "errors.deadletterqueue.topic.replication.factor": "1",
+      "errors.deadletterqueue.context.headers.enable": "true",
+      "errors.retry.timeout": "600000",
+      "errors.retry.delay.max.ms": "30000"
+    }
+
+  # ── tms-rabbitmq-sink ─────────────────────────────────────────────
+  # Drains tms.scada.encrypted into the RabbitMQ amq.topic exchange with
+  # routing key tms.scada.pas — same exchange/key as the Camel bridge,
+  # so SCADA's existing MQTT subscription continues to work unchanged.
+  #
+  # autoDeclareProducer=true: declares the exchange on first connection
+  # if it doesn't exist. Idempotent + harmless if the exchange already
+  # exists (RabbitMQ default amq.topic always does).
+  tms-rabbitmq-sink.json: |
+    {
+      "connector.class": "org.apache.camel.kafkaconnector.springrabbitmqsink.CamelSpringrabbitmqsinkSinkConnector",
+      "tasks.max": "1",
+      "topics": "tms.scada.encrypted",
+
+      "camel.kamelet.spring-rabbitmq-sink.host": "rabbitmq-internal.scada.svc.cluster.local",
+      "camel.kamelet.spring-rabbitmq-sink.port": "5672",
+      "camel.kamelet.spring-rabbitmq-sink.username": "${env:RABBITMQ_USER}",
+      "camel.kamelet.spring-rabbitmq-sink.password": "${env:RABBITMQ_PASS}",
+      "camel.kamelet.spring-rabbitmq-sink.exchangeName": "amq.topic",
+      "camel.kamelet.spring-rabbitmq-sink.routingKey": "tms.scada.pas",
+      "camel.kamelet.spring-rabbitmq-sink.autoDeclareProducer": "false",
+
+      "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+      "value.converter": "org.apache.kafka.connect.storage.StringConverter",
+
+      "errors.tolerance": "all",
+      "errors.log.enable": "true",
+      "errors.deadletterqueue.topic.name": "dlq.connect.tms-rabbitmq-sink",
+      "errors.deadletterqueue.topic.replication.factor": "1",
+      "errors.deadletterqueue.context.headers.enable": "true",
+      "errors.retry.timeout": "600000",
+      "errors.retry.delay.max.ms": "30000"
+    }
+
+  # tms-mqtt-sink — NOT included by default.
+  #
+  # Both tms-rabbitmq-sink and tms-mqtt-sink would consume from
+  # tms.scada.encrypted; registering both means SCADA gets every message
+  # twice. The existing setup uses RabbitMQ → MQTT plugin → SCADA, so
+  # the RabbitMQ sink covers the path. To switch to direct Kafka → MQTT,
+  # see "Direct MQTT sink" in connect/README.md for the snippet to add
+  # here, and remove tms-rabbitmq-sink before applying.
+
+  # ── scada-rabbitmq-source ─────────────────────────────────────────
+  # SCADA API publishes RSAE responses to MQTT topic scada/tms/alarms.
+  # RabbitMQ's MQTT plugin maps that to routing key scada.tms.alarms on
+  # exchange amq.topic, bound to queue scada.tms.alarms.queue (declared
+  # by the existing inbound config in tms/k8s).
+  #
+  # This source connector consumes from that queue and publishes the
+  # encrypted payload to Kafka topic scada.tms.raw, where the Streams
+  # app's reverse topology picks it up.
+  scada-rabbitmq-source.json: |
+    {
+      "connector.class": "org.apache.camel.kafkaconnector.springrabbitmqsource.CamelSpringrabbitmqsourceSourceConnector",
+      "tasks.max": "1",
+      "topics": "scada.tms.raw",
+
+      "camel.kamelet.spring-rabbitmq-source.host": "rabbitmq-internal.scada.svc.cluster.local",
+      "camel.kamelet.spring-rabbitmq-source.port": "5672",
+      "camel.kamelet.spring-rabbitmq-source.username": "${env:RABBITMQ_USER}",
+      "camel.kamelet.spring-rabbitmq-source.password": "${env:RABBITMQ_PASS}",
+      "camel.kamelet.spring-rabbitmq-source.exchangeName": "amq.topic",
+      "camel.kamelet.spring-rabbitmq-source.routingKey": "scada.tms.alarms",
+      "camel.kamelet.spring-rabbitmq-source.queues": "scada.tms.alarms.queue",
+      "camel.kamelet.spring-rabbitmq-source.autoDeclare": "false",
+
+      "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+      "value.converter": "org.apache.kafka.connect.converters.ByteArrayConverter",
+
+      "errors.tolerance": "all",
+      "errors.log.enable": "true",
+      "errors.log.include.messages": "true",
+      "errors.deadletterqueue.topic.name": "dlq.connect.scada-rabbitmq-source",
+      "errors.deadletterqueue.topic.replication.factor": "1",
+      "errors.deadletterqueue.context.headers.enable": "true",
+      "errors.retry.timeout": "600000",
+      "errors.retry.delay.max.ms": "30000"
+    }
+
+  # ── scada-artemis-sink ────────────────────────────────────────────
+  # Drains scada.tms.processed (Streams reverse output — decrypted, optionally
+  # XML-converted) into the TMS-side Artemis topic SCADA.TMS.Alarms so
+  # legacy TMS consumers see the data on the broker they already subscribe to.
+  scada-artemis-sink.json: |
+    {
+      "connector.class": "org.apache.camel.kafkaconnector.jmspooledapacheartemissink.CamelJmspooledapacheartemissinkSinkConnector",
+      "tasks.max": "1",
+      "topics": "scada.tms.processed",
+
+      "camel.kamelet.jms-pooled-apache-artemis-sink.brokerURL": "tcp://host.minikube.internal:61616",
+      "camel.kamelet.jms-pooled-apache-artemis-sink.destinationName": "SCADA.TMS.Alarms",
+      "camel.kamelet.jms-pooled-apache-artemis-sink.destinationType": "topic",
+      "camel.kamelet.jms-pooled-apache-artemis-sink.username": "${env:ARTEMIS_USER}",
+      "camel.kamelet.jms-pooled-apache-artemis-sink.password": "${env:ARTEMIS_PASSWORD}",
+
+      "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+      "value.converter": "org.apache.kafka.connect.storage.StringConverter",
+
+      "errors.tolerance": "all",
+      "errors.log.enable": "true",
+      "errors.deadletterqueue.topic.name": "dlq.connect.scada-artemis-sink",
+      "errors.deadletterqueue.topic.replication.factor": "1",
+      "errors.deadletterqueue.context.headers.enable": "true",
+      "errors.retry.timeout": "600000",
+      "errors.retry.delay.max.ms": "30000"
+    }

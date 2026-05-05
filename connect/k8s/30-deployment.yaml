@@ -1,0 +1,183 @@
+# Kafka Connect worker — distributed mode, single replica (scale via
+# `kubectl scale --replicas=N` once stable; state lives in Kafka topics
+# so multi-replica Just Works).
+#
+# Mode rationale: distributed even with replicas=1, because state is
+# persisted to Kafka (connector configs, offsets, status) and survives
+# pod restarts cleanly.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-connect
+  namespace: pinkline
+  labels:
+    app: kafka-connect
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-connect
+  template:
+    metadata:
+      labels:
+        app: kafka-connect
+    spec:
+      containers:
+        - name: kafka-connect
+          image: pinkline/pas-scada-connect:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: rest
+              containerPort: 8083
+          env:
+            # ── Cluster / bootstrap ────────────────────────────────
+            - name: CONNECT_BOOTSTRAP_SERVERS
+              value: "kafka-service.pinkline.svc.cluster.local:9092"
+            - name: CONNECT_REST_ADVERTISED_HOST_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: CONNECT_REST_PORT
+              value: "8083"
+            - name: CONNECT_GROUP_ID
+              value: "pas-scada-connect"
+
+            # ── Distributed-mode internal topics ───────────────────
+            # RF=1 because the dev Kafka is single-broker.
+            # Bump to 3 once the Kafka cluster has >=3 brokers.
+            - name: CONNECT_CONFIG_STORAGE_TOPIC
+              value: "_connect-configs"
+            - name: CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR
+              value: "1"
+            - name: CONNECT_OFFSET_STORAGE_TOPIC
+              value: "_connect-offsets"
+            - name: CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR
+              value: "1"
+            - name: CONNECT_OFFSET_STORAGE_PARTITIONS
+              value: "25"
+            - name: CONNECT_STATUS_STORAGE_TOPIC
+              value: "_connect-status"
+            - name: CONNECT_STATUS_STORAGE_REPLICATION_FACTOR
+              value: "1"
+            - name: CONNECT_STATUS_STORAGE_PARTITIONS
+              value: "5"
+
+            # ── Default converters (per-connector overrides win) ──
+            - name: CONNECT_KEY_CONVERTER
+              value: "org.apache.kafka.connect.storage.StringConverter"
+            - name: CONNECT_VALUE_CONVERTER
+              value: "org.apache.kafka.connect.converters.ByteArrayConverter"
+            - name: CONNECT_INTERNAL_KEY_CONVERTER
+              value: "org.apache.kafka.connect.json.JsonConverter"
+            - name: CONNECT_INTERNAL_VALUE_CONVERTER
+              value: "org.apache.kafka.connect.json.JsonConverter"
+
+            # ── Plugin path ────────────────────────────────────────
+            - name: CONNECT_PLUGIN_PATH
+              value: "/usr/share/java,/usr/share/confluent-hub-components"
+
+            # ── Config providers — required for ${env:X} substitution
+            # Without this, "${env:ARTEMIS_USER}" goes to JMS as a literal
+            # 19-char string and auth fails silently. Verify after deploy:
+            #   curl $CONNECT/connectors/tms-artemis-source/config
+            # should show the resolved "pasbridge", not the placeholder.
+            - name: CONNECT_CONFIG_PROVIDERS
+              value: "env"
+            - name: CONNECT_CONFIG_PROVIDERS_ENV_CLASS
+              value: "org.apache.kafka.common.config.provider.EnvVarConfigProvider"
+
+            # ── Producer reliability (no data loss on broker failover) ──
+            - name: CONNECT_PRODUCER_ACKS
+              value: "all"
+            - name: CONNECT_PRODUCER_ENABLE_IDEMPOTENCE
+              value: "true"
+            - name: CONNECT_PRODUCER_MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION
+              value: "5"
+            - name: CONNECT_PRODUCER_RETRIES
+              value: "2147483647"
+
+            # ── Logging ────────────────────────────────────────────
+            - name: CONNECT_LOG4J_ROOT_LOGLEVEL
+              value: "INFO"
+            - name: CONNECT_LOG4J_LOGGERS
+              value: "org.apache.kafka.connect.runtime.rest=WARN,org.reflections=ERROR,org.apache.camel.kafkaconnector=INFO"
+
+            # ── Credentials referenced by connector JSONs via ${env:X} ───
+            # EnvVarConfigProvider reads from the worker process's env,
+            # so every secret key referenced by ANY connector must appear
+            # here as an env entry.
+            - name: ARTEMIS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: connect-secret
+                  key: ARTEMIS_USER
+            - name: ARTEMIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: connect-secret
+                  key: ARTEMIS_PASSWORD
+            - name: RABBITMQ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: connect-secret
+                  key: RABBITMQ_USER
+            - name: RABBITMQ_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: connect-secret
+                  key: RABBITMQ_PASS
+            - name: MQTT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: connect-secret
+                  key: MQTT_USER
+            - name: MQTT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: connect-secret
+                  key: MQTT_PASS
+
+          # Connect itself — REST API readiness is the right signal.
+          # Liveness uses the same endpoint at a longer interval so a
+          # blip during connector load doesn't cause a kill.
+          readinessProbe:
+            httpGet:
+              path: /connectors
+              port: 8083
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8083
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu:    "500m"
+            limits:
+              memory: "2Gi"
+              cpu:    "1500m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-connect
+  namespace: pinkline
+  labels:
+    app: kafka-connect
+spec:
+  selector:
+    app: kafka-connect
+  ports:
+    - name: rest
+      port: 8083
+      targetPort: 8083
+  type: ClusterIP

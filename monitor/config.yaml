@@ -1,0 +1,119 @@
+# PAS-SCADA Health Monitor — default checks
+#
+# Override at deploy time by mounting a ConfigMap at /etc/monitor/config.yaml.
+# Service DNS names match the existing tms/k8s and external-scada/k8s manifests.
+#
+# fail_threshold     — consecutive failed probes before the DOWN email fires
+# recover_threshold  — consecutive successful probes before the RECOVERED email fires
+# (higher thresholds = less noise from transient blips, slower detection of real outages)
+
+interval_s: 30        # how often the full check cycle runs
+workers:    8         # parallel probes per cycle
+
+checks:
+
+  # ── PAS-SCADA Bridge (in-cluster, pinkline namespace) ──────────
+  # Spring Boot Actuator returns full per-route health, including which
+  # broker is DOWN — that detail goes into the alert email body.
+  - name: pas-scada-bridge
+    type: actuator
+    url:  http://pas-scada-bridge.pinkline.svc.cluster.local:8085/actuator/health
+    timeout_s: 5
+    fail_threshold: 3
+    recover_threshold: 2
+
+  # ── ActiveMQ Artemis (in-cluster TMS broker) ──────────────────
+  - name: artemis-openwire
+    type: tcp
+    host: artemis-service.pinkline.svc.cluster.local
+    port: 61616
+    timeout_s: 5
+    fail_threshold: 3
+    recover_threshold: 2
+
+  - name: artemis-console
+    type: http
+    url:  http://artemis-service.pinkline.svc.cluster.local:8161/console/login
+    timeout_s: 5
+    fail_threshold: 3
+    recover_threshold: 2
+
+  # ── Kafka + Zookeeper (in-cluster) ────────────────────────────
+  # Kafka has no HTTP — TCP connect is the lightest accurate signal.
+  - name: kafka
+    type: tcp
+    host: kafka-service.pinkline.svc.cluster.local
+    port: 9092
+    timeout_s: 5
+    fail_threshold: 5      # higher: kafka can blip during pod reschedule
+    recover_threshold: 2
+
+  - name: zookeeper
+    type: tcp
+    host: zookeeper-service.pinkline.svc.cluster.local
+    port: 2181
+    timeout_s: 5
+    fail_threshold: 5
+    recover_threshold: 2
+
+  # ── RabbitMQ (SCADA VM, separate cluster, reached via NodePort) ──
+  # NodePort mapping per external-scada/k8s/50-rabbitmq-service.yaml:
+  #   AMQP        30672
+  #   MQTT        31883
+  #   mgmt HTTP   31567
+  #   WS-MQTT     31568
+  - name: rabbitmq-mgmt
+    type: http
+    url:  http://10.4.0.25:31567/api/healthchecks/node
+    auth: basic
+    username_env: RABBITMQ_USER
+    password_env: RABBITMQ_PASS
+    timeout_s: 5
+    fail_threshold: 3
+    recover_threshold: 2
+
+  - name: rabbitmq-amqp
+    type: tcp
+    host: 10.4.0.25
+    port: 30672
+    timeout_s: 5
+    fail_threshold: 3
+    recover_threshold: 2
+
+  - name: rabbitmq-mqtt
+    type: tcp
+    host: 10.4.0.25
+    port: 31883
+    timeout_s: 5
+    fail_threshold: 3
+    recover_threshold: 2
+
+  # ── SCADA API (Flask, SCADA VM, NodePort) ─────────────────────
+  # /api/status returns mqtt.connected — alert when MQTT detaches even if
+  # the Flask process itself is responsive.
+  # NodePort 30891 per external-scada/k8s/70-scada-api-deployment.yaml.
+  - name: scada-api
+    type: http
+    url:  http://10.4.0.25:30891/api/status
+    timeout_s: 5
+    fail_threshold: 3
+    recover_threshold: 2
+
+  - name: scada-api-mqtt-link
+    type: json_field
+    url:  http://10.4.0.25:30891/api/status
+    field: mqtt.connected
+    equals: true
+    timeout_s: 5
+    fail_threshold: 5
+    recover_threshold: 2
+
+  # ── External TMS Artemis (Cairo) ──────────────────────────────
+  # Uncomment and set IP once cross-VM connectivity is verified.
+  # - name: artemis-tms-cairo
+  #   type: tcp
+  #   host: 10.12.1.13
+  #   port: 61616
+  #   timeout_s: 10
+  #   fail_threshold: 3
+  #   recover_threshold: 2

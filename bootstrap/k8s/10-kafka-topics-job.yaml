@@ -1,0 +1,120 @@
+# Pre-creates every Kafka topic the pipeline needs, with intended
+# partition counts and retention. Uses kafka-topics.sh from the same
+# Confluent image as the broker, so behavior matches.
+#
+# Idempotent — --if-not-exists is per-topic, so re-running this Job after
+# adding a new topic to the ConfigMap creates only the missing ones.
+#
+# Run after a fresh cluster, or after editing topics-spec.json:
+#   kubectl -n pinkline delete job bootstrap-kafka-topics --ignore-not-found
+#   kubectl apply -f bootstrap/k8s/10-kafka-topics-job.yaml
+#   kubectl -n pinkline logs -f job/bootstrap-kafka-topics
+#
+# REPLICATION FACTOR: set to 1 because the dev cluster has 1 broker.
+# Bump to 3 once Kafka has >=3 brokers (edit topics-spec.json).
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-topics-spec
+  namespace: pinkline
+data:
+  # One line per topic: <name> <partitions> <replication> <retention.ms> [cleanup_policy]
+  # cleanup_policy is optional. Default = delete. Use "compact" for keyed-state topics.
+  # Retention values: 7d for pipeline data, 14d for DLQ (give time to replay).
+  # Compacted topics ignore retention.ms and retain the latest record per key forever.
+  topics-spec.txt: |
+    tms.raw                              3  1  604800000
+    tms.scada.encrypted                  3  1  604800000
+    scada.tms.raw                        3  1  604800000
+    scada.tms.processed                  3  1  604800000
+    scada.tms.alarms.state               3  1  604800000  compact
+    dlq.connect.tms-artemis-source       1  1  1209600000
+    dlq.connect.tms-rabbitmq-sink        1  1  1209600000
+    dlq.connect.scada-rabbitmq-source    1  1  1209600000
+    dlq.connect.scada-artemis-sink       1  1  1209600000
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bootstrap-kafka-topics
+  namespace: pinkline
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: kafka-topics
+          image: confluentinc/cp-kafka:7.5.0
+          env:
+            - name: KAFKA_BOOTSTRAP
+              # Update if your cluster's Kafka lives elsewhere.
+              value: "kafka-service.pinkline.svc.cluster.local:9092"
+          volumeMounts:
+            - name: spec
+              mountPath: /spec
+              readOnly: true
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -eu
+              echo "Waiting for Kafka at $KAFKA_BOOTSTRAP ..."
+              for i in $(seq 1 60); do
+                if /usr/bin/kafka-topics --bootstrap-server "$KAFKA_BOOTSTRAP" --list >/dev/null 2>&1; then
+                  echo "Kafka is up"
+                  break
+                fi
+                sleep 5
+              done
+
+              FAILED=0
+              while read -r name partitions replication retention cleanup; do
+                # skip blanks / comments
+                [ -z "$name" ] && continue
+                case "$name" in '#'*) continue ;; esac
+
+                policy="${cleanup:-delete}"
+                echo "──────────────────────────────────────────"
+                echo "→ $name (partitions=$partitions, rf=$replication, retention=${retention}ms, cleanup.policy=$policy)"
+                echo "──────────────────────────────────────────"
+                CFG_ARGS=(--config "retention.ms=$retention" --config "cleanup.policy=$policy")
+                if [ "$policy" = "compact" ]; then
+                  # Compaction tuning so demos see segments roll quickly.
+                  CFG_ARGS+=(--config "min.cleanable.dirty.ratio=0.01" --config "segment.ms=60000")
+                fi
+                if /usr/bin/kafka-topics \
+                    --bootstrap-server "$KAFKA_BOOTSTRAP" \
+                    --create \
+                    --if-not-exists \
+                    --topic "$name" \
+                    --partitions "$partitions" \
+                    --replication-factor "$replication" \
+                    "${CFG_ARGS[@]}"; then
+                  echo "  OK"
+                else
+                  echo "  FAILED"
+                  FAILED=$((FAILED+1))
+                fi
+              done < /spec/topics-spec.txt
+
+              echo
+              echo "── final topic list (filtered) ──"
+              /usr/bin/kafka-topics --bootstrap-server "$KAFKA_BOOTSTRAP" --list \
+                | grep -E '^(tms|scada|dlq)\.' \
+                | sort
+
+              if [ "$FAILED" -gt 0 ]; then
+                echo "ERROR: $FAILED topic creations failed"
+                exit 1
+              fi
+              echo "All topics ready."
+      volumes:
+        - name: spec
+          configMap:
+            name: kafka-topics-spec
+            items:
+              - key: topics-spec.txt
+                path: topics-spec.txt

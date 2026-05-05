@@ -1,0 +1,55 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bridge-config
+  namespace: pinkline
+data:
+  SPRING_PROFILES_ACTIVE: "prod"
+
+  ARTEMIS_HOST: "host.minikube.internal"
+  ARTEMIS_PORT: "61616"
+  SPRING_ACTIVEMQ_BROKER_URL: "tcp://host.minikube.internal:61616"
+  SPRING_ACTIVEMQ_USER: "admin"
+  SPRING_ACTIVEMQ_PASSWORD: "admin"
+
+  KAFKA_HOST: "kafka-service.pinkline.svc.cluster.local"
+  KAFKA_PORT: "9092"
+
+  RABBITMQ_HOST: "rabbitmq-internal.scada.svc.cluster.local"
+  RABBITMQ_PORT: "5672"
+
+  MQTT_HOST: "rabbitmq-internal.scada.svc.cluster.local"
+  MQTT_PORT: "1883"
+
+  # Connect-mode: bridge consumes from Kafka tms.raw (populated by
+  # tms-artemis-source connector) and writes back to scada.tms.processed
+  # (drained to Artemis SCADA.TMS.Alarms by scada-artemis-sink connector).
+  # Bridge skips its Artemis-direct loop so messages aren't double-consumed.
+  BRIDGE_INPUT_FROM_KAFKA: "true"
+  BRIDGE_REVERSE_KAFKA_ENABLED: "true"
+  # SCADA→TMS direction is plain JSON (no encryption). Forward stays encrypted.
+  BRIDGE_REVERSE_KAFKA_ENCRYPT_ENABLED: "false"
+  # Connect owns RabbitMQ + MQTT delivery (per client ask: "Connect path must
+  # be active"). Bridge only transforms (XML→JSON+encrypt) and writes Kafka.
+  # If you re-add rabbitmq,mqtt here you'll get duplicate publishes.
+  BRIDGE_PIPELINE: "kafka"
+  BRIDGE_ARTEMIS_TOPICS: "TMS.PISInfo,RCS.E2K.TMS.TrafficReportClient,TSInfo,RCS.E2K.TMS.RouteInfo"
+  BRIDGE_MONITOR_ENABLED: "true"
+  BRIDGE_MONITOR_FROM_EXCHANGE: "amq.topic"
+  BRIDGE_MONITOR_ROUTING_KEY: "tms.scada.pas"
+  BRIDGE_MONITOR_QUEUE: "scada.monitor.queue"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: bridge-secret
+  namespace: pinkline
+type: Opaque
+stringData:
+  ARTEMIS_USER: "admin"
+  ARTEMIS_PASS: "admin"
+  RABBITMQ_USER: "thiru"
+  RABBITMQ_PASS: "password"
+  MQTT_USER: "thiru"
+  MQTT_PASS: "password"
+  SCADA_AES_KEY: "k7Qh2NfT8vR0mC9aXy4pLwZbE3sG6uJtH1iKd5oArMw="

@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+           http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.2.0</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>com.pinkline</groupId>
+  <artifactId>PAS-SCADA-Kafka-Bridge</artifactId>
+  <version>1.0.0</version>
+  <packaging>jar</packaging>
+  <name>PAS-SCADA-Kafka-Bridge</name>
+  <description>
+    Pink Line TMS to SCADA integration bridge.
+    Reads XML from ActiveMQ Artemis, converts to JSON,
+    encrypts with AES-256-GCM, publishes to Kafka.
+    Kafka consumer forwards to RabbitMQ -> MQTT -> SCADA API.
+    GP product (PASInfoConverter) is NOT modified.
+  </description>
+
+  <properties>
+    <java.version>17</java.version>
+    <camel.version>4.4.0</camel.version>
+  </properties>
+
+  <dependencies>
+
+    <!-- Spring Boot Web (health check endpoint) -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <!-- Apache Camel Spring Boot core -->
+    <dependency>
+      <groupId>org.apache.camel.springboot</groupId>
+      <artifactId>camel-spring-boot-starter</artifactId>
+      <version>${camel.version}</version>
+    </dependency>
+
+    <!-- ActiveMQ Artemis — subscribe to TMS XML topics -->
+    <dependency>
+      <groupId>org.apache.camel.springboot</groupId>
+      <artifactId>camel-activemq-starter</artifactId>
+      <version>${camel.version}</version>
+    </dependency>
+
+    <!-- Kafka — publish encrypted messages + consume -->
+    <dependency>
+      <groupId>org.apache.camel.springboot</groupId>
+      <artifactId>camel-kafka-starter</artifactId>
+      <version>${camel.version}</version>
+    </dependency>
+
+    <!-- RabbitMQ — forward to SCADA via MQTT plugin -->
+    <!-- camel-spring-rabbitmq-starter is the Camel 4.x replacement for camel-rabbitmq-starter -->
+    <dependency>
+      <groupId>org.apache.camel.springboot</groupId>
+      <artifactId>camel-spring-rabbitmq-starter</artifactId>
+      <version>${camel.version}</version>
+    </dependency>
+    <!-- Spring AMQP needed by camel-spring-rabbitmq -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-amqp</artifactId>
+    </dependency>
+
+    <!-- Jackson JSON -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+
+    <!-- Jackson XML — reads XML automatically, no manual DOM parsing -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.dataformat</groupId>
+      <artifactId>jackson-dataformat-xml</artifactId>
+    </dependency>
+
+    <!-- Spring Boot Actuator — exposes /actuator/camelroutes, /health, etc. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+
+    <!-- Camel management — enables /actuator/camelroutes REST endpoint -->
+    <dependency>
+      <groupId>org.apache.camel.springboot</groupId>
+      <artifactId>camel-management-starter</artifactId>
+      <version>${camel.version}</version>
+    </dependency>
+
+    <!-- MQTT direct publish via Paho (used when 'mqtt' is in bridge.pipeline) -->
+    <dependency>
+      <groupId>org.apache.camel.springboot</groupId>
+      <artifactId>camel-paho-starter</artifactId>
+      <version>${camel.version}</version>
+    </dependency>
+
+    <!-- Spring Boot Test -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <!-- Local dev test key — 32 zero bytes base64. NOT for production. -->
+          <environmentVariables>
+            <SCADA_AES_KEY>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=</SCADA_AES_KEY>
+          </environmentVariables>
+        </configuration>
+      </plugin>
+      <!-- Set SCADA_AES_KEY for EncryptProcessorTest (32 zero bytes base64 = test key) -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <environmentVariables>
+            <SCADA_AES_KEY>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=</SCADA_AES_KEY>
+          </environmentVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+</project>

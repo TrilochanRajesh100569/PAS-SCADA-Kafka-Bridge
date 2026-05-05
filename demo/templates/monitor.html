@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% set active = 'monitor' %}
+{% block title %}Monitor — PAS-SCADA Demo{% endblock %}
+
+{% block content %}
+
+<div class="summary">
+  <div class="stat-card arrival">
+    <div class="label">UP</div>
+    <div class="value" id="stat-up">—</div>
+  </div>
+  <div class="stat-card" style="border-left-color:var(--red);">
+    <div class="label">DOWN</div>
+    <div class="value" id="stat-down" style="color:var(--red);">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Total components</div>
+    <div class="value" id="stat-total-comp">—</div>
+  </div>
+  <div class="stat-card routeinfo">
+    <div class="label">Last refresh</div>
+    <div class="value" id="stat-refresh" style="font-size:14px;">—</div>
+  </div>
+</div>
+
+<div class="msg-grid" id="cards">
+  <div class="empty muted" style="padding:40px; text-align:center; grid-column:1/-1;">
+    Waiting for monitor data…
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<style>
+  /* Component card grid — same look as the standalone monitor's / page */
+  .msg-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 12px;
+  }
+  .comp-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .comp-card.up      { border-left: 4px solid var(--green); }
+  .comp-card.down    { border-left: 4px solid var(--red);   }
+  .comp-card.unknown { border-left: 4px solid #6e7681; }
+  .comp-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 8px;
+  }
+  .comp-name { font-weight: 700; font-size: 14px; }
+  .comp-status {
+    font-size: 11px; font-weight: 700; letter-spacing: 1px;
+    padding: 2px 8px; border-radius: 4px;
+  }
+  .comp-status.up   { background: #23863633; color: var(--green); }
+  .comp-status.down { background: #f8514933; color: var(--red);   }
+  .comp-status.unknown { background: #6e768133; color: var(--muted); }
+  .comp-meta {
+    color: var(--muted); font-size: 11px; margin-top: 4px;
+    font-family: var(--mono);
+  }
+  .comp-meta .label { display: inline-block; width: 80px; color: #6e7681; }
+  .comp-err {
+    color: var(--red); font-size: 11px; margin-top: 6px;
+    font-family: var(--mono); word-break: break-all;
+  }
+  .comp-card.down { animation: downPulse 1.5s ease-in-out infinite; }
+  @keyframes downPulse {
+    0%,100% { box-shadow: 0 0 0 0 #f8514900; }
+    50%     { box-shadow: 0 0 16px 2px #f8514955; }
+  }
+</style>
+
+<script>
+  const conn = document.getElementById('conn');
+  const cardsEl = document.getElementById('cards');
+
+  function fmtTime(iso){
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleTimeString(undefined, { hour12: false }); }
+    catch (e) { return iso; }
+  }
+  function escapeHtml(s){
+    return String(s ?? '').replace(/[&<>"']/g, c => (
+      { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]
+    ));
+  }
+
+  function renderCards(state) {
+    const names = Object.keys(state).sort();
+    if (names.length === 0) {
+      cardsEl.innerHTML = '<div class="empty muted" style="padding:40px;text-align:center;grid-column:1/-1;">No checks have run yet — refresh in a few seconds.</div>';
+      return;
+    }
+    let up = 0, down = 0;
+    cardsEl.innerHTML = names.map(name => {
+      const s = state[name];
+      const cs = s.current_state || 'UNKNOWN';
+      const cls = cs === 'UP' ? 'up' : cs === 'DOWN' ? 'down' : 'unknown';
+      if (cs === 'UP')   up++;
+      if (cs === 'DOWN') down++;
+      const errBlock = (s.last_error && cs === 'DOWN')
+        ? `<div class="comp-err">${escapeHtml(s.last_error)}</div>` : '';
+      return `
+        <div class="comp-card ${cls}">
+          <div class="comp-head">
+            <span class="comp-name">${escapeHtml(name)}</span>
+            <span class="comp-status ${cls}">${cs}</span>
+          </div>
+          <div class="comp-meta"><span class="label">last OK</span>${fmtTime(s.last_ok_at)}</div>
+          <div class="comp-meta"><span class="label">last fail</span>${fmtTime(s.last_fail_at)}</div>
+          <div class="comp-meta"><span class="label">since</span>${fmtTime(s.last_state_change)}</div>
+          <div class="comp-meta"><span class="label">fails</span>${s.consecutive_fails || 0} consecutive</div>
+          ${errBlock}
+        </div>`;
+    }).join('');
+
+    document.getElementById('stat-up').textContent          = up;
+    document.getElementById('stat-down').textContent        = down;
+    document.getElementById('stat-total-comp').textContent  = names.length;
+    document.getElementById('stat-refresh').textContent     = new Date().toLocaleTimeString();
+    document.getElementById('msg-count').textContent        = `${up}/${names.length} UP`;
+    document.getElementById('last-time').textContent        = new Date().toLocaleTimeString();
+  }
+
+  async function refresh() {
+    try {
+      const r = await fetch('/api/monitor', { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const state = await r.json();
+      conn.textContent = '● connected';
+      conn.className = 'pill conn-ok';
+      renderCards(state);
+    } catch (e) {
+      conn.textContent = '✗ ' + e.message;
+      conn.className = 'pill conn-fail';
+    }
+  }
+
+  refresh();
+  setInterval(refresh, 3000);     // poll every 3s — good balance for client demo
+</script>
+{% endblock %}

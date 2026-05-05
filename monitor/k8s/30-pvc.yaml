@@ -1,0 +1,13 @@
+# Persists state.json across pod restarts so dedup/recovery logic
+# survives a reschedule. Without this, every restart looks like a
+# fresh DOWN to every check and floods the inbox.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: monitor-state
+  namespace: pinkline
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 100Mi

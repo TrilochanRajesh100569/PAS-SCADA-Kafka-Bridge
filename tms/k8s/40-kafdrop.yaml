@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafdrop
+  namespace: pinkline
+  labels:
+    app: kafdrop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafdrop
+  template:
+    metadata:
+      labels:
+        app: kafdrop
+    spec:
+      containers:
+        - name: kafdrop
+          image: obsidiandynamics/kafdrop:4.0.1
+          ports:
+            - containerPort: 9000
+          env:
+            - name: KAFKA_BROKERCONNECT
+              value: "kafka-service.pinkline.svc.cluster.local:9092"
+            - name: JVM_OPTS
+              value: "-Xms64M -Xmx256M"
+            - name: SERVER_SERVLET_CONTEXTPATH
+              value: "/"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu:    "50m"
+            limits:
+              memory: "512Mi"
+              cpu:    "300m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafdrop
+  namespace: pinkline
+  labels:
+    app: kafdrop
+spec:
+  selector:
+    app: kafdrop
+  ports:
+    - name: http
+      port: 9000
+      targetPort: 9000
+  type: ClusterIP

@@ -1,0 +1,185 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: monitor-config
+  namespace: pinkline
+data:
+  SMTP_HOST: "smtp.gmail.com"
+  SMTP_PORT: "587"
+  SMTP_TLS:  "true"
+  SMTP_SSL:  "false"
+  SMTP_FROM: "alerts@example.com"
+  SMTP_TO:   "ops@example.com"
+  ALERT_PREFIX: "[PAS-SCADA]"
+
+  config.yaml: |
+    interval_s: 15
+    workers:    8
+
+    checks:
+      - name: pas-scada-bridge
+        type: actuator
+        url:  http://pas-scada-bridge.pinkline.svc.cluster.local:8085/actuator/health
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+
+      - name: artemis-openwire
+        type: tcp
+        host: host.minikube.internal
+        port: 61616
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+
+      - name: artemis-console
+        type: http
+        url:  http://host.minikube.internal:8161/console/login
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+
+      - name: kafka
+        type: tcp
+        host: kafka-service.pinkline.svc.cluster.local
+        port: 9092
+        timeout_s: 5
+        fail_threshold: 5
+        recover_threshold: 2
+
+      - name: zookeeper
+        type: tcp
+        host: zookeeper-service.pinkline.svc.cluster.local
+        port: 2181
+        timeout_s: 5
+        fail_threshold: 5
+        recover_threshold: 2
+
+      - name: rabbitmq-amqp
+        type: tcp
+        host: rabbitmq-internal.scada.svc.cluster.local
+        port: 5672
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+
+      - name: rabbitmq-mqtt
+        type: tcp
+        host: rabbitmq-internal.scada.svc.cluster.local
+        port: 1883
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+
+      - name: scada-api
+        type: http
+        url:  http://scada-api-internal.scada.svc.cluster.local:8091/api/status
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+
+      - name: kafdrop
+        type: http
+        url:  http://kafdrop.pinkline.svc.cluster.local:9000
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+
+      - name: pas-scada-demo
+        type: http
+        url:  http://pas-scada-demo.pinkline.svc.cluster.local:8090
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+
+      - name: scada-api-mqtt-link
+        type: json_field
+        url:  http://scada-api-internal.scada.svc.cluster.local:8091/api/status
+        field: mqtt.connected
+        equals: true
+        timeout_s: 5
+        fail_threshold: 5
+        recover_threshold: 2
+
+      # ── Kafka Connect: REST API + every connector + every task ────
+      - name: kafka-connect
+        type: http
+        url:  http://kafka-connect.pinkline.svc.cluster.local:8083/connectors
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+
+      - name: connector-tms-artemis-source
+        type: json_field
+        url:  http://kafka-connect.pinkline.svc.cluster.local:8083/connectors/tms-artemis-source/status
+        field: connector.state
+        equals: "RUNNING"
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+
+      - name: connector-tms-artemis-source-trafficreport
+        type: json_field
+        url:  http://kafka-connect.pinkline.svc.cluster.local:8083/connectors/tms-artemis-source-trafficreport/status
+        field: connector.state
+        equals: "RUNNING"
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+
+      - name: connector-tms-artemis-source-tsinfo
+        type: json_field
+        url:  http://kafka-connect.pinkline.svc.cluster.local:8083/connectors/tms-artemis-source-tsinfo/status
+        field: connector.state
+        equals: "RUNNING"
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+
+      - name: connector-tms-artemis-source-routeinfo
+        type: json_field
+        url:  http://kafka-connect.pinkline.svc.cluster.local:8083/connectors/tms-artemis-source-routeinfo/status
+        field: connector.state
+        equals: "RUNNING"
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+
+      - name: connector-tms-rabbitmq-sink
+        type: json_field
+        url:  http://kafka-connect.pinkline.svc.cluster.local:8083/connectors/tms-rabbitmq-sink/status
+        field: connector.state
+        equals: "RUNNING"
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+
+      - name: connector-scada-rabbitmq-source
+        type: json_field
+        url:  http://kafka-connect.pinkline.svc.cluster.local:8083/connectors/scada-rabbitmq-source/status
+        field: connector.state
+        equals: "RUNNING"
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+
+      - name: connector-scada-artemis-sink
+        type: json_field
+        url:  http://kafka-connect.pinkline.svc.cluster.local:8083/connectors/scada-artemis-sink/status
+        field: connector.state
+        equals: "RUNNING"
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: monitor-secret
+  namespace: pinkline
+type: Opaque
+stringData:
+  SMTP_USER: "alerts@example.com"
+  SMTP_PASS: "REPLACE-WITH-APP-PASSWORD"
+  RABBITMQ_USER: "thiru"
+  RABBITMQ_PASS: "password"

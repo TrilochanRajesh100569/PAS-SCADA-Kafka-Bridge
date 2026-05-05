@@ -1,0 +1,119 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pas-scada-bridge
+  namespace: pinkline
+  labels:
+    app: pas-scada-bridge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pas-scada-bridge
+  template:
+    metadata:
+      labels:
+        app: pas-scada-bridge
+    spec:
+      containers:
+        - name: pas-scada-bridge
+          image: pinkline/pas-scada-bridge:latest
+          ports:
+            - containerPort: 8085
+
+          # ── Non-sensitive config from ConfigMap ──────────
+          # Provides: SPRING_PROFILES_ACTIVE, ARTEMIS_HOST/PORT,
+          #           KAFKA_HOST/PORT, RABBITMQ_HOST/PORT, MQTT_HOST/PORT
+          envFrom:
+            - configMapRef:
+                name: bridge-config
+
+          # ── Sensitive config from Secret ─────────────────
+          # Provides: ARTEMIS_USER/PASS, RABBITMQ_USER/PASS,
+          #           MQTT_USER/PASS, SCADA_AES_KEY
+          env:
+            - name: SCADA_AES_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: bridge-secret
+                  key: SCADA_AES_KEY
+            - name: ARTEMIS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: bridge-secret
+                  key: ARTEMIS_USER
+            - name: ARTEMIS_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: bridge-secret
+                  key: ARTEMIS_PASS
+            - name: RABBITMQ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: bridge-secret
+                  key: RABBITMQ_USER
+            - name: RABBITMQ_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: bridge-secret
+                  key: RABBITMQ_PASS
+            - name: MQTT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: bridge-secret
+                  key: MQTT_USER
+            - name: MQTT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: bridge-secret
+                  key: MQTT_PASS
+
+          # TLS volume — DevOps will uncomment when ready:
+          # volumeMounts:
+          #   - name: truststore
+          #     mountPath: /etc/ssl/bridge
+          #     readOnly: true
+
+          # ── Health checks ─────────────────────────────────
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8085
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8085
+            initialDelaySeconds: 20
+            periodSeconds: 10
+
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+
+      # TLS volume — DevOps will uncomment when ready:
+      # volumes:
+      #   - name: truststore
+      #     secret:
+      #       secretName: bridge-tls-truststore
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pas-scada-bridge
+  namespace: pinkline
+spec:
+  selector:
+    app: pas-scada-bridge
+  ports:
+    - port: 8085
+      targetPort: 8085
+  type: ClusterIP

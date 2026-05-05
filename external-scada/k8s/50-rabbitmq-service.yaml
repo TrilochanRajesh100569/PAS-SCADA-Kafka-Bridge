@@ -1,0 +1,79 @@
+# ═══════════════════════════════════════════════════════════════════
+# RabbitMQ Services — split into INTERNAL and EXTERNAL
+#
+#   rabbitmq-internal  (ClusterIP)  — for pods inside the SCADA cluster
+#                                     (e.g. SCADA API subscribers)
+#   rabbitmq-external  (NodePort)   — for cross-VM reach from TMS bridge
+#
+# ─── NodePort mapping (MUST match tms/k8s/configmap.yaml) ────────────
+#   AMQP        5672  →  NodePort 30672   (bridge publishes here)
+#   MQTT        1883  →  NodePort 31883
+#   HTTP mgmt   15672 →  NodePort 31567
+#   WS-MQTT     15675 →  NodePort 31568
+#
+# ─── If you prefer LoadBalancer over NodePort ───────────────────────
+#   1. Change `type: NodePort` → `type: LoadBalancer` below
+#   2. Remove the `nodePort:` lines (LB uses the `port:` values)
+#   3. Update tms/k8s/configmap.yaml:
+#        RABBITMQ_PORT: "5672"
+#        MQTT_PORT:     "1883"
+#
+# ─── Firewall on external VM (NodePort case) ────────────────────────
+#   Allow TMS VM subnet → external VM :30672/tcp (AMQP only)
+#   Optional: :31883/tcp if MQTT clients live outside the cluster
+# ═══════════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-internal
+  namespace: scada
+  labels:
+    app: rabbitmq
+spec:
+  selector:
+    app: rabbitmq
+  ports:
+    - name: amqp
+      port: 5672
+      targetPort: 5672
+    - name: mqtt
+      port: 1883
+      targetPort: 1883
+    - name: http-mgmt
+      port: 15672
+      targetPort: 15672
+    - name: ws-mqtt
+      port: 15675
+      targetPort: 15675
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-external
+  namespace: scada
+  labels:
+    app: rabbitmq
+  annotations:
+    description: "NodePort for cross-VM bridge publish + admin access"
+spec:
+  selector:
+    app: rabbitmq
+  ports:
+    - name: amqp
+      port: 5672
+      targetPort: 5672
+      nodePort: 30672         # ← must match tms/k8s/configmap.yaml RABBITMQ_PORT
+    - name: mqtt
+      port: 1883
+      targetPort: 1883
+      nodePort: 31883         # ← must match tms/k8s/configmap.yaml MQTT_PORT
+    - name: http-mgmt
+      port: 15672
+      targetPort: 15672
+      nodePort: 31567
+    - name: ws-mqtt
+      port: 15675
+      targetPort: 15675
+      nodePort: 31568
+  type: NodePort

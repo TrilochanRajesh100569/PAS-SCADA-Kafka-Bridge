@@ -1,0 +1,89 @@
+# Registers (or reconciles) every connector definition in connect-config
+# against the Connect REST API.
+#
+# Idempotent: PUT /connectors/<name>/config creates-or-updates by name,
+# so re-running this Job after editing the ConfigMap reconciles state.
+#
+# To add a new connector: drop another <name>.json into connect-config and
+# re-run this Job. To delete: edit the ConfigMap to remove the file and
+# DELETE the connector via the REST API directly.
+#
+# Re-run after edits:
+#   kubectl -n pinkline delete job register-connectors --ignore-not-found
+#   kubectl apply -f connect/k8s/40-job-register.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: register-connectors
+  namespace: pinkline
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: register
+          image: curlimages/curl:8.10.1
+          volumeMounts:
+            - name: connector-configs
+              mountPath: /connectors
+              readOnly: true
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              CONNECT="http://kafka-connect.pinkline.svc.cluster.local:8083"
+
+              echo "Waiting for Connect REST API at $CONNECT ..."
+              for i in $(seq 1 60); do
+                if curl -fsS "$CONNECT/" >/dev/null 2>&1; then
+                  echo "Connect is up"
+                  break
+                fi
+                sleep 5
+              done
+
+              echo
+              echo "Loaded connector plugins:"
+              curl -fsS "$CONNECT/connector-plugins" \
+                | tr ',' '\n' \
+                | grep -oE '"class":"[^"]+"' \
+                | grep -i 'CamelKafka\|kafkaconnector' \
+                || true
+              echo
+
+              FAILED=0
+              for cfg in /connectors/*.json; do
+                name=$(basename "$cfg" .json)
+                echo "──────────────────────────────────────────"
+                echo "→ $name"
+                echo "──────────────────────────────────────────"
+                HTTP=$(curl -sS -o /tmp/resp.json -w "%{http_code}" \
+                    -X PUT \
+                    -H "Content-Type: application/json" \
+                    --data-binary @"$cfg" \
+                    "$CONNECT/connectors/$name/config")
+                echo "  PUT /config -> HTTP $HTTP"
+                case "$HTTP" in
+                  200|201) echo "  registered" ;;
+                  *) echo "  FAILED:"; cat /tmp/resp.json; echo; FAILED=$((FAILED+1)) ;;
+                esac
+              done
+
+              echo
+              echo "Connector statuses (after 5s):"
+              sleep 5
+              curl -fsS "$CONNECT/connectors?expand=status" | tr ',' '\n' | grep -E 'name|state' | head -40 || true
+              echo
+
+              if [ "$FAILED" -gt 0 ]; then
+                echo "ERROR: $FAILED registrations failed"
+                exit 1
+              fi
+              echo "All connectors registered."
+
+      volumes:
+        - name: connector-configs
+          configMap:
+            name: connect-config

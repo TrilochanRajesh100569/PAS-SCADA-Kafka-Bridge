@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bridge-config
+  namespace: pinkline
+data:
+  # ═══════════════════════════════════════════════════════════════════
+  # Bridge config — binds to application-prod.properties ${ENV_VAR} refs
+  # Every value below is configurable. DevOps: edit, then apply.
+  # ═══════════════════════════════════════════════════════════════════
+  SPRING_PROFILES_ACTIVE: "prod"
+
+  # ── ActiveMQ Artemis (IN-CLUSTER: same namespace, Service DNS) ─────
+  # camel.component.activemq.broker-url = tcp://${ARTEMIS_HOST}:${ARTEMIS_PORT}
+  ARTEMIS_HOST: "artemis-service"
+  ARTEMIS_PORT: "61616"
+
+  # ── Kafka (IN-CLUSTER: same namespace, Service DNS) ────────────────
+  # kafka.brokers = ${KAFKA_HOST}:${KAFKA_PORT}
+  KAFKA_HOST: "kafka-service"
+  KAFKA_PORT: "9092"
+
+  # ── RabbitMQ (EXTERNAL VM / SCADA cluster — cross-VM reach) ────────
+  # spring.rabbitmq.host = ${RABBITMQ_HOST}
+  # spring.rabbitmq.port = ${RABBITMQ_PORT}
+  RABBITMQ_HOST: "10.4.0.25"
+  RABBITMQ_PORT: "5673"             # host-mapped port on SCADA VM
+
+  # ── MQTT (same external RabbitMQ broker, MQTT plugin) ──────────────
+  # bridge.mqtt.broker-url = tcp://${MQTT_HOST}:${MQTT_PORT}
+  MQTT_HOST: "10.4.0.25"
+  MQTT_PORT: "1884"                 # host-mapped MQTT port on SCADA VM
+
+  # ── Bridge pipeline & behaviour (configurable per env) ─────────────
+  BRIDGE_PIPELINE: "kafka,rabbitmq,mqtt"
+  BRIDGE_MONITOR_ENABLED: "true"
+  BRIDGE_MONITOR_FROM_EXCHANGE: "amq.topic"
+  BRIDGE_MONITOR_ROUTING_KEY: "tms.scada.pas"
+  BRIDGE_MONITOR_QUEUE: "scada.monitor.queue"
+
+  # ── TLS (uncomment when DevOps mounts the truststore Secret) ───────
+  # TLS_TRUSTSTORE_PATH: "/etc/ssl/bridge/truststore.jks"

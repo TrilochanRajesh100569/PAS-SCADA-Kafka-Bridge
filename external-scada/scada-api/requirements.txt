@@ -1,0 +1,4 @@
+paho-mqtt==1.6.1
+flask==3.0.0
+cryptography==42.0.5
+requests==2.32.3

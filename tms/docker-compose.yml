@@ -1,0 +1,100 @@
+# ════════════════════════════════════════════════════════════
+# PAS-SCADA-Kafka-Bridge — INTERNAL VM (TMS side)
+# ════════════════════════════════════════════════════════════
+
+services:
+
+  artemis:
+    image: apache/activemq-artemis:2.31.2
+    container_name: pas-artemis
+    ports:
+      - "61616:61616"
+      - "8161:8161"
+    environment:
+      ARTEMIS_USER: pasbridge
+      ARTEMIS_PASSWORD: testpass123
+      ANONYMOUS_LOGIN: "false"
+    volumes:
+      - artemis-data:/var/lib/artemis-instance
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: pas-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: pas-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://10.4.0.23:9092,INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,INTERNAL://0.0.0.0:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+
+  kafdrop:
+    image: obsidiandynamics/kafdrop:latest
+    container_name: pas-kafdrop
+    depends_on:
+      - kafka
+    ports:
+      - "9000:9000"
+    environment:
+      KAFKA_BROKERCONNECT: kafka:29092
+      JVM_OPTS: "-Xms32M -Xmx64M"
+
+  bridge:
+    build: .
+    image: pas-scada-kafka-bridge:latest
+    container_name: pas-scada-bridge
+    depends_on:
+      - artemis
+      - kafka
+    ports:
+      - "8085:8085"
+    environment:
+      SPRING_PROFILES_ACTIVE: "prod"
+
+      # Artemis
+      ARTEMIS_HOST: artemis
+      ARTEMIS_PORT: "61616"
+      ARTEMIS_USER: pasbridge
+      ARTEMIS_PASS: testpass123
+
+      # Kafka
+      KAFKA_HOST: kafka
+      KAFKA_PORT: "29092"
+
+      # ✅ External VM — tms-node03 / VM2 (10.4.0.25) running external-scada compose
+      RABBITMQ_HOST: 10.4.0.25
+      RABBITMQ_PORT: "5673"
+      RABBITMQ_USER: thiru
+      RABBITMQ_PASS: password
+
+      MQTT_HOST: 10.4.0.25
+      MQTT_PORT: "1884"
+      MQTT_USER: thiru
+      MQTT_PASS: password
+
+      SCADA_AES_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+      BRIDGE_PIPELINE: "kafka,rabbitmq"
+
+      BRIDGE_MONITOR_ENABLED: "true"
+      BRIDGE_MONITOR_FROM_EXCHANGE: "amq.topic"
+      BRIDGE_MONITOR_ROUTING_KEY: "tms.scada.pas"
+      BRIDGE_MONITOR_QUEUE: "scada.monitor.queue"
+
+volumes:
+  artemis-data:

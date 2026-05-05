@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+{% set active = 'flow' %}
+{% block title %}Flow Diagram — PAS-SCADA Demo{% endblock %}
+
+{% block content %}
+
+<div class="flow">
+  <div class="flow-row" id="flow-row">
+    <div class="node" id="n-tms">
+      <div class="node-icon">🚆</div>
+      <div class="node-name">TMS Server</div>
+      <div class="node-sub">Artemis publish</div>
+      <div class="node-count" id="c-tms">0</div>
+    </div>
+
+    <div class="arrow" id="a-1"><div class="packet" id="p-1"></div></div>
+
+    <div class="node" id="n-artemis">
+      <div class="node-icon">📨</div>
+      <div class="node-name">Artemis</div>
+      <div class="node-sub">JMS topic</div>
+      <div class="node-count" id="c-artemis">0</div>
+    </div>
+
+    <div class="arrow" id="a-2"><div class="packet" id="p-2"></div></div>
+
+    <div class="node" id="n-bridge">
+      <div class="node-icon">🔄</div>
+      <div class="node-name">Bridge</div>
+      <div class="node-sub">XML→JSON+AES</div>
+      <div class="node-count" id="c-bridge">0</div>
+    </div>
+
+    <div class="arrow" id="a-3"><div class="packet" id="p-3"></div></div>
+
+    <div class="node" id="n-kafka">
+      <div class="node-icon">📦</div>
+      <div class="node-name">Kafka</div>
+      <div class="node-sub">tms.scada.encrypted</div>
+      <div class="node-count" id="c-kafka">0</div>
+    </div>
+
+    <div class="arrow" id="a-4"><div class="packet" id="p-4"></div></div>
+
+    <div class="node" id="n-rabbit">
+      <div class="node-icon">🐰</div>
+      <div class="node-name">RabbitMQ</div>
+      <div class="node-sub">amq.topic / MQTT</div>
+      <div class="node-count" id="c-rabbit">0</div>
+    </div>
+
+    <div class="arrow" id="a-5"><div class="packet" id="p-5"></div></div>
+
+    <div class="node" id="n-scada">
+      <div class="node-icon">🎯</div>
+      <div class="node-name">SCADA API</div>
+      <div class="node-sub">decrypt + display</div>
+      <div class="node-count" id="c-scada">0</div>
+    </div>
+  </div>
+</div>
+
+<div class="last-msg-panel">
+  <h3>Last message</h3>
+  <div class="last-msg-grid">
+    <div><span class="label">id&nbsp;</span><span id="lm-id">—</span></div>
+    <div><span class="label">time&nbsp;</span><span id="lm-time">—</span></div>
+    <div><span class="label">topic&nbsp;</span><span id="lm-topic">—</span></div>
+    <div><span class="label">type&nbsp;</span><span id="lm-type">—</span></div>
+    <div><span class="label">platform&nbsp;</span><span id="lm-platform">—</span></div>
+    <div><span class="label">train&nbsp;</span><span id="lm-train">—</span></div>
+  </div>
+  <pre class="last-msg-json" id="lm-json">—</pre>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const counts = { tms:0, artemis:0, bridge:0, kafka:0, rabbit:0, scada:0 };
+  let total = 0;
+
+  function detectType(json){
+    if (!json) return 'unknown';
+    if (json.routeInfo) return 'RouteInfo';
+    const pp = (json.platformPredictions || [])[0];
+    const t = pp && (pp.predictedTrains || [])[0];
+    if (t) {
+      if (t.status === 1) return 'SingleArrival';
+      if (t.status === 2) return 'SingleDeparture';
+      return 'ATRTimeTable';
+    }
+    return json.messageType || 'unknown';
+  }
+
+  function syntaxHighlight(json){
+    return json.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+        m => { let cls='json-num';
+          if (/^"/.test(m)) cls = /:$/.test(m) ? 'json-key' : 'json-str';
+          else if (/true|false/.test(m)) cls='json-bool';
+          return `<span class="${cls}">${m}</span>`;
+        });
+  }
+
+  function flashNode(id){
+    const el = document.getElementById(id);
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 500);
+  }
+
+  function bumpCount(boxId, key){
+    counts[key]++;
+    document.getElementById(boxId).textContent = counts[key];
+  }
+
+  function flyPacket(arrowId, packetId, fromColor){
+    const arrow  = document.getElementById(arrowId);
+    const packet = document.getElementById(packetId);
+    arrow.classList.add('active');
+    packet.style.background = fromColor;
+    packet.style.boxShadow = `0 0 12px ${fromColor}`;
+    packet.style.left = '0';
+    packet.classList.add('fly');
+    requestAnimationFrame(() => {
+      packet.style.left = (arrow.offsetWidth - 16) + 'px';
+    });
+    setTimeout(() => {
+      packet.classList.remove('fly');
+      packet.style.left = '0';
+      arrow.classList.remove('active');
+    }, 420);
+  }
+
+  const TYPE_COLOR = {
+    'ATRTimeTable':    '#58a6ff',
+    'SingleArrival':   '#3fb950',
+    'SingleDeparture': '#f78166',
+    'RouteInfo':       '#bc8cff',
+    'unknown':         '#d29922',
+  };
+
+  function animate(msg){
+    let body = null;
+    try { body = JSON.parse(msg.json); } catch(e){}
+    const type  = detectType(body);
+    const color = TYPE_COLOR[type] || TYPE_COLOR.unknown;
+
+    total++;
+    document.getElementById('msg-count').textContent = total + ' messages';
+    document.getElementById('last-time').textContent = new Date(msg.receivedAt).toLocaleTimeString();
+
+    // Update last-message panel immediately
+    document.getElementById('lm-id').textContent       = '#' + msg.id;
+    document.getElementById('lm-time').textContent     = new Date(msg.receivedAt).toLocaleTimeString();
+    document.getElementById('lm-topic').textContent    = msg.topic;
+    document.getElementById('lm-type').textContent     = type;
+    document.getElementById('lm-type').style.color     = color;
+
+    let platform = '—', train = '—';
+    if (body) {
+      if (body.routeInfo) {
+        train = body.routeInfo.trainGUID || '—';
+      } else {
+        const pp = (body.platformPredictions || [])[0];
+        const t  = pp && (pp.predictedTrains || [])[0];
+        if (pp) platform = pp.platformId;
+        if (t)  train    = t.trainId;
+      }
+    }
+    document.getElementById('lm-platform').textContent = platform;
+    document.getElementById('lm-train').textContent    = train;
+    document.getElementById('lm-json').innerHTML       = syntaxHighlight(JSON.stringify(body || msg.json, null, 2));
+
+    // Animate packet through 5 arrows / 6 nodes
+    flashNode('n-tms'); bumpCount('c-tms', 'tms');
+    setTimeout(() => flyPacket('a-1', 'p-1', color), 50);
+    setTimeout(() => { flashNode('n-artemis'); bumpCount('c-artemis', 'artemis'); }, 470);
+    setTimeout(() => flyPacket('a-2', 'p-2', color), 520);
+    setTimeout(() => { flashNode('n-bridge');  bumpCount('c-bridge',  'bridge');  }, 940);
+    setTimeout(() => flyPacket('a-3', 'p-3', color), 990);
+    setTimeout(() => { flashNode('n-kafka');   bumpCount('c-kafka',   'kafka');   }, 1410);
+    setTimeout(() => flyPacket('a-4', 'p-4', color), 1460);
+    setTimeout(() => { flashNode('n-rabbit');  bumpCount('c-rabbit',  'rabbit');  }, 1880);
+    setTimeout(() => flyPacket('a-5', 'p-5', color), 1930);
+    setTimeout(() => { flashNode('n-scada');   bumpCount('c-scada',   'scada');   }, 2350);
+  }
+
+  // ── connect SSE ──
+  const conn = document.getElementById('conn');
+  const es = new EventSource('/api/stream');
+  es.onopen  = () => { conn.textContent = '● connected'; conn.className = 'pill conn-ok'; };
+  es.onerror = () => { conn.textContent = '✗ disconnected'; conn.className = 'pill conn-fail'; };
+  es.onmessage = e => {
+    try { animate(JSON.parse(e.data)); }
+    catch (err) { console.warn('bad SSE event', err); }
+  };
+</script>
+{% endblock %}

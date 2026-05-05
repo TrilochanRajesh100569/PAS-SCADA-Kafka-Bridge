@@ -1,0 +1,102 @@
+# Declares the SCADA→TMS RabbitMQ queue + binding required by the
+# scada-rabbitmq-source Connect connector.
+#
+# In the legacy setup, the Camel bridge's Spring AMQP topology declared
+# this queue at startup. Once the bridge is removed in Phase 5, this
+# Job becomes the canonical place that ensures the queue + binding exist.
+#
+# Idempotent — uses the management HTTP API which treats declare-existing
+# as a 204 no-op. Safe to re-run.
+#
+# RabbitMQ creds come from connect-secret (same Secret the connectors use).
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bootstrap-rabbitmq-queue
+  namespace: pinkline
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: rabbitmq-bootstrap
+          image: curlimages/curl:8.10.1
+          env:
+            - name: RMQ_HOST
+              # SCADA-side RabbitMQ — separate cluster, reached via NodePort.
+              # NodePort mapping defined in external-scada/k8s/50-rabbitmq-service.yaml.
+              value: "10.4.0.25"
+            - name: RMQ_MGMT_PORT
+              value: "31567"
+            - name: RMQ_VHOST
+              value: "/"
+            - name: EXCHANGE
+              value: "amq.topic"
+            - name: QUEUE
+              value: "scada.tms.alarms.queue"
+            - name: ROUTING_KEY
+              value: "scada.tms.alarms"
+            - name: RABBITMQ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: connect-secret
+                  key: RABBITMQ_USER
+            - name: RABBITMQ_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: connect-secret
+                  key: RABBITMQ_PASS
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              # %2F is URL-encoded "/" for the default vhost.
+              VHOST_ENC=$(echo -n "$RMQ_VHOST" | sed 's|/|%2F|g')
+              BASE="http://${RMQ_HOST}:${RMQ_MGMT_PORT}/api"
+              AUTH="-u ${RABBITMQ_USER}:${RABBITMQ_PASS}"
+
+              echo "Waiting for RabbitMQ management API at ${BASE} ..."
+              for i in $(seq 1 60); do
+                if curl -fsS $AUTH "${BASE}/overview" >/dev/null 2>&1; then
+                  echo "RabbitMQ is up"
+                  break
+                fi
+                sleep 5
+              done
+
+              echo "→ declaring queue ${QUEUE} in vhost ${RMQ_VHOST}"
+              HTTP=$(curl -sS -o /tmp/q.json -w "%{http_code}" $AUTH \
+                  -X PUT \
+                  -H "Content-Type: application/json" \
+                  --data '{"durable": true, "auto_delete": false}' \
+                  "${BASE}/queues/${VHOST_ENC}/${QUEUE}")
+              echo "  HTTP $HTTP"
+              case "$HTTP" in
+                201|204) echo "  queue OK" ;;
+                *) echo "  queue declare FAILED:"; cat /tmp/q.json; exit 1 ;;
+              esac
+
+              echo "→ binding ${QUEUE} to ${EXCHANGE} with key ${ROUTING_KEY}"
+              HTTP=$(curl -sS -o /tmp/b.json -w "%{http_code}" $AUTH \
+                  -X POST \
+                  -H "Content-Type: application/json" \
+                  --data "{\"routing_key\": \"${ROUTING_KEY}\"}" \
+                  "${BASE}/bindings/${VHOST_ENC}/e/${EXCHANGE}/q/${QUEUE}")
+              echo "  HTTP $HTTP"
+              case "$HTTP" in
+                201|204) echo "  binding OK" ;;
+                *) echo "  binding FAILED:"; cat /tmp/b.json; exit 1 ;;
+              esac
+
+              echo
+              echo "── final state ──"
+              echo "Queue ${QUEUE}:"
+              curl -sS $AUTH "${BASE}/queues/${VHOST_ENC}/${QUEUE}" \
+                | grep -oE '"name":"[^"]*"|"messages":[0-9]+|"durable":(true|false)' || true
+              echo
+              echo "Bindings on exchange ${EXCHANGE}:"
+              curl -sS $AUTH "${BASE}/exchanges/${VHOST_ENC}/${EXCHANGE}/bindings/source" \
+                | tr ',' '\n' | grep -E 'destination|routing_key' | head -20 || true

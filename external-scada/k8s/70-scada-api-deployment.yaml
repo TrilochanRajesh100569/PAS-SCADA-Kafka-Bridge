@@ -1,0 +1,120 @@
+# ═══════════════════════════════════════════════════════════════════
+# SCADA API — Python Flask mock SCADA simulator
+#
+# Connects to RabbitMQ (MQTT) on rabbitmq-internal:1883.
+# Subscribes to: tms/scada/pas  (encrypted from bridge)
+# Publishes to:  scada/tms/alarms  (4 RSAE types back to TMS)
+# Dashboard: http://<node-ip>:30891
+#
+# Image: build locally and push to your registry, then update `image:`
+#   cd external-scada/scada-api
+#   docker build -t ghcr.io/<owner>/pas-scada-api:latest .
+#   docker push ghcr.io/<owner>/pas-scada-api:latest
+# ═══════════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scada-api
+  namespace: scada
+  labels:
+    app: scada-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: scada-api
+  template:
+    metadata:
+      labels:
+        app: scada-api
+    spec:
+      containers:
+        - name: scada-api
+          image: ghcr.io/thirunavukkarasuthangaraj/pas-scada-api:latest
+          ports:
+            - containerPort: 8091
+              name: http
+
+          # Non-sensitive config
+          env:
+            - name: MQTT_HOST
+              value: "rabbitmq-internal"       # ClusterIP service in same namespace
+            - name: MQTT_PORT
+              value: "1883"
+            - name: MQTT_TOPIC_IN
+              value: "tms/scada/pas"
+            - name: MQTT_TOPIC_OUT
+              value: "scada/tms/alarms"
+            - name: SCADA_CREATOR_ID
+              value: "ScateX"
+
+            # Sensitive config from secret
+            - name: MQTT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: scada-api-secret
+                  key: MQTT_USER
+            - name: MQTT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: scada-api-secret
+                  key: MQTT_PASS
+            - name: SCADA_AES_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: scada-api-secret
+                  key: SCADA_AES_KEY
+
+          livenessProbe:
+            httpGet:
+              path: /api/status
+              port: 8091
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /api/status
+              port: 8091
+            initialDelaySeconds: 10
+            periodSeconds: 10
+
+          resources:
+            requests: { memory: "128Mi", cpu: "100m" }
+            limits:   { memory: "256Mi", cpu: "250m" }
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: scada-api-internal
+  namespace: scada
+  labels:
+    app: scada-api
+spec:
+  selector:
+    app: scada-api
+  ports:
+    - name: http
+      port: 8091
+      targetPort: 8091
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: scada-api-external
+  namespace: scada
+  labels:
+    app: scada-api
+spec:
+  selector:
+    app: scada-api
+  ports:
+    - name: http
+      port: 8091
+      targetPort: 8091
+      nodePort: 30891       # Dashboard: http://<scada-vm-ip>:30891
+  type: NodePort

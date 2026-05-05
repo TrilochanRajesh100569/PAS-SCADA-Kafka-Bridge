@@ -1,0 +1,108 @@
+# Monitor ConfigMap — checks list + non-sensitive SMTP server settings.
+# To add/change checks at runtime: edit this file, kubectl apply, then
+# the monitor will pick up new config on its next pod restart.
+#
+# kubectl rollout restart deployment/pas-scada-monitor -n pinkline
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: monitor-config
+  namespace: pinkline
+data:
+  # SMTP non-sensitive settings (host, port, sender, recipients).
+  # Credentials live in monitor-secret.
+  SMTP_HOST: "smtp.gmail.com"
+  SMTP_PORT: "587"
+  SMTP_TLS:  "true"
+  SMTP_SSL:  "false"
+  SMTP_FROM: "alerts@example.com"
+  SMTP_TO:   "ops@example.com,oncall@example.com"
+  ALERT_PREFIX: "[PAS-SCADA]"
+
+  # The full check list, identical structure to monitor/config.yaml.
+  # Edit here; ConfigMap mount overrides the image's default.
+  config.yaml: |
+    interval_s: 30
+    workers:    8
+
+    checks:
+      - name: pas-scada-bridge
+        type: actuator
+        url:  http://pas-scada-bridge.pinkline.svc.cluster.local:8085/actuator/health
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+
+      - name: artemis-openwire
+        type: tcp
+        host: artemis-service.pinkline.svc.cluster.local
+        port: 61616
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+
+      - name: artemis-console
+        type: http
+        url:  http://artemis-service.pinkline.svc.cluster.local:8161/console/login
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+
+      - name: kafka
+        type: tcp
+        host: kafka-service.pinkline.svc.cluster.local
+        port: 9092
+        timeout_s: 5
+        fail_threshold: 5
+        recover_threshold: 2
+
+      - name: zookeeper
+        type: tcp
+        host: zookeeper-service.pinkline.svc.cluster.local
+        port: 2181
+        timeout_s: 5
+        fail_threshold: 5
+        recover_threshold: 2
+
+      - name: rabbitmq-mgmt
+        type: http
+        url:  http://10.4.0.25:31567/api/healthchecks/node
+        auth: basic
+        username_env: RABBITMQ_USER
+        password_env: RABBITMQ_PASS
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+
+      - name: rabbitmq-amqp
+        type: tcp
+        host: 10.4.0.25
+        port: 30672
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+
+      - name: rabbitmq-mqtt
+        type: tcp
+        host: 10.4.0.25
+        port: 31883
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+
+      - name: scada-api
+        type: http
+        url:  http://10.4.0.25:30891/api/status
+        timeout_s: 5
+        fail_threshold: 3
+        recover_threshold: 2
+
+      - name: scada-api-mqtt-link
+        type: json_field
+        url:  http://10.4.0.25:30891/api/status
+        field: mqtt.connected
+        equals: true
+        timeout_s: 5
+        fail_threshold: 5
+        recover_threshold: 2
