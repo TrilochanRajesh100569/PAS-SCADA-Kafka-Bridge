@@ -374,6 +374,10 @@ HTTP REST), so any subset can run independently.
 
 ## 12 · Production cloud-server deployment
 
+> **Full prod guide:** see [`PROD-DEPLOY.md`](./PROD-DEPLOY.md) for the complete
+> deployment, verification, troubleshooting, rotation, and rollback flow.
+> This section is a quick summary.
+
 When deploying to a cloud server where the **client's Artemis is already
 running** (not on this host), use start.sh's prod mode. Same script, same
 flow — just env vars + one extra `source` step.

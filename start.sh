@@ -13,6 +13,7 @@
 # Companion docs:
 #   FRESH-PC-SETUP.md     — first-time bring-up walkthrough
 #   MORNING-START.md      — daily restart routine after PC reboot
+#   PROD-DEPLOY.md        — production cloud-server deployment guide
 #   WORKFLOW.md           — what each component does and how data flows
 #   MANUAL-RUN.md         — step-by-step alternative to this script
 #   QUEUES-AND-TOPICS.md  — every Artemis address, Kafka topic, RabbitMQ
