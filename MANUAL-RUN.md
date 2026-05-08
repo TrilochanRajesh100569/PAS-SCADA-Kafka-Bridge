@@ -433,6 +433,61 @@ Open http://localhost:8080 — after ~30s the dashboard should show 19 component
 
 ---
 
+## Step 8b · Artemis viewer queues (optional — makes console browsable)
+
+Artemis multicast topics (`TMS.PISInfo`, `SCADA.TMS.Alarms`, etc.) discard
+messages when no subscriber is attached — the console will look empty even
+when 10000+ messages have flowed through. Create a durable "viewer" queue
+under each address to retain a copy you can browse.
+
+> Skip this step if you only inspect data via Kafdrop. Artemis won't
+> actually need viewers for the pipeline to work — they're just for visibility.
+
+### Run
+```bash
+declare -A VIEWERS=(
+  [scada-tms-viewer]=SCADA.TMS.Alarms
+  [tms-pisinfo-viewer]=TMS.PISInfo
+  [trafficreport-viewer]=RCS.E2K.TMS.TrafficReportClient
+  [tsinfo-viewer]=TSInfo
+  [routeinfo-viewer]=RCS.E2K.TMS.RouteInfo
+)
+for q in "${!VIEWERS[@]}"; do
+  MSYS_NO_PATHCONV=1 docker exec artemis \
+    /var/lib/artemis-instance/bin/artemis queue create \
+    --name "$q" --address "${VIEWERS[$q]}" \
+    --durable --multicast --auto-create-address \
+    --user admin --password admin --silent || true
+done
+```
+
+### Check
+```bash
+MSYS_NO_PATHCONV=1 docker exec artemis \
+  /var/lib/artemis-instance/bin/artemis queue stat \
+  --user admin --password admin --url tcp://localhost:61616 \
+  | grep -E "NAME|viewer"
+# Expect 5 rows: scada-tms-viewer, tms-pisinfo-viewer, trafficreport-viewer,
+# tsinfo-viewer, routeinfo-viewer
+```
+
+Then open http://localhost:8161/console (admin/admin) → `addresses` →
+`SCADA.TMS.Alarms` → `queues` → `scada-tms-viewer` → **More ▾** →
+**Browse**. Each row is one alarm.
+
+### If it fails
+| Symptom | Fix |
+|---|---|
+| `Queue ... already exists` (non-zero exit) | Idempotent — the `\|\| true` swallows it. Safe to re-run. |
+| `MSYS_NO_PATHCONV: command not found` | You're in PowerShell, not Git Bash. Drop the `MSYS_NO_PATHCONV=1` prefix. |
+| `Authentication failed` | Artemis user/pass changed. Default is admin/admin from messaging-infra docker-compose. |
+| Queues exist but always 0 messages | Pipeline upstream is broken — check connectors, see Step 9 below. |
+
+> See `QUEUES-AND-TOPICS.md` for the full inventory of addresses, topics,
+> and queues across Artemis, Kafka, and RabbitMQ.
+
+---
+
 ## Step 9 · End-to-end data flow test
 
 ### Forward (TMS → SCADA, encrypted)

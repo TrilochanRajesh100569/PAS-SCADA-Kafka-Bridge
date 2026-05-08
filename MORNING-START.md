@@ -167,6 +167,18 @@ To prove data is reaching Artemis (even though you can't browse the topic):
 
 ---
 
+## Want to browse messages IN the Artemis console?
+
+By default Artemis topics drop messages when no subscriber is connected,
+so the console looks empty. To make all 5 multicast addresses browsable,
+create durable "viewer" queues — one-time setup, persists across restarts.
+
+> **See [`QUEUES-AND-TOPICS.md`](./QUEUES-AND-TOPICS.md) Section 6**
+> for the create commands, the list of 5 queues, verify steps, and
+> maintenance (purge / delete).
+
+---
+
 ## Diagnostic commands — when something looks broken
 
 Copy-paste these into Git Bash (or PowerShell) to see the full system state.

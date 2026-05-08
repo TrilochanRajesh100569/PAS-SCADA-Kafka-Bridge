@@ -1521,8 +1521,12 @@ Every knob, where to turn it:
 | Connector configs (5) | `connect/k8s/20-configmap.yaml` | each connector JSON |
 | Kafka topic specs | `bootstrap/k8s/10-kafka-topics-job.yaml` | inline ConfigMap `topics-spec.txt` |
 | RabbitMQ queue/binding | `bootstrap/k8s/20-rabbitmq-queue-job.yaml` | env vars in Job |
+| Artemis viewer queues (manual, optional) | `start.sh` Section 11c | see [`QUEUES-AND-TOPICS.md`](./QUEUES-AND-TOPICS.md) §6 |
 | Probe definitions (19) | `monitor/config.yaml` | `probes:` array |
 | Demo data sources | `demo/app.py` | hardcoded; reads same MQTT/RabbitMQ as scada-api |
+
+> **Full inventory of every address, topic, queue, and routing key** across
+> Artemis / Kafka / RabbitMQ is in [`QUEUES-AND-TOPICS.md`](./QUEUES-AND-TOPICS.md).
 
 ---
 

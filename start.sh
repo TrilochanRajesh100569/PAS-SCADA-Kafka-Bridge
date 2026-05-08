@@ -11,10 +11,12 @@
 # Prerequisites: docker, minikube, kubectl on PATH.
 #
 # Companion docs:
-#   FRESH-PC-SETUP.md  — first-time bring-up walkthrough
-#   MORNING-START.md   — daily restart routine after PC reboot
-#   WORKFLOW.md        — what each component does and how data flows
-#   MANUAL-RUN.md      — step-by-step alternative to this script
+#   FRESH-PC-SETUP.md     — first-time bring-up walkthrough
+#   MORNING-START.md      — daily restart routine after PC reboot
+#   WORKFLOW.md           — what each component does and how data flows
+#   MANUAL-RUN.md         — step-by-step alternative to this script
+#   QUEUES-AND-TOPICS.md  — every Artemis address, Kafka topic, RabbitMQ
+#                           queue + manual viewer-queue create commands
 
 set -euo pipefail
 
@@ -280,6 +282,39 @@ kubectl -n pinkline patch deploy pas-scada-demo --type=json \
 kubectl -n pinkline rollout restart deploy/pas-scada-demo 2>/dev/null || true
 ok "Demo applied"
 
+# ── 11c. Artemis viewer queues (browsable in console) ──────────────────
+# Multicast addresses drop messages when no subscriber is connected — that
+# makes the Artemis console look empty even when 10000+ messages have flowed
+# through. Creating one durable "viewer" queue per address keeps a copy of
+# every routed message so you can browse it in the console.
+#
+# Idempotent: `queue create` errors if the queue already exists, but the
+# `|| true` swallows that so re-runs are safe. Set CREATE_VIEWERS=0 to skip.
+#
+# See QUEUES-AND-TOPICS.md §6 for full details.
+if [ "${CREATE_VIEWERS:-1}" = "1" ]; then
+  log "Creating Artemis viewer queues (idempotent)"
+  declare -A VIEWERS=(
+    [scada-tms-viewer]=SCADA.TMS.Alarms
+    [tms-pisinfo-viewer]=TMS.PISInfo
+    [trafficreport-viewer]=RCS.E2K.TMS.TrafficReportClient
+    [tsinfo-viewer]=TSInfo
+    [routeinfo-viewer]=RCS.E2K.TMS.RouteInfo
+  )
+  for q in "${!VIEWERS[@]}"; do
+    addr="${VIEWERS[$q]}"
+    MSYS_NO_PATHCONV=1 docker exec artemis \
+      /var/lib/artemis-instance/bin/artemis queue create \
+      --name "$q" --address "$addr" \
+      --durable --multicast --auto-create-address \
+      --user admin --password admin --silent >/dev/null 2>&1 \
+      && ok "viewer queue: $q  ($addr)" \
+      || ok "viewer queue: $q  ($addr) — already exists"
+  done
+else
+  warn "CREATE_VIEWERS=0 — skipped Artemis viewer queues"
+fi
+
 # ── 12. Status + auto port-forwards + URLs ──────────────────────────────
 log "Final status"
 kubectl -n pinkline get pods
@@ -350,6 +385,11 @@ cat <<EOF
     Connect REST      http://localhost:8083/connectors?expand=status
     RabbitMQ admin    http://localhost:15672            (thiru / password)
     Artemis console   http://localhost:8161/console     (admin / admin)
+
+  Browse messages inside Artemis (after viewer queues are created):
+    addresses → SCADA.TMS.Alarms → queues → scada-tms-viewer → More ▾ → Browse
+    addresses → TMS.PISInfo      → queues → tms-pisinfo-viewer → More ▾ → Browse
+  See QUEUES-AND-TOPICS.md for the full list.
 
 EOF
 ok "Stack is up."

@@ -377,6 +377,8 @@ HTTP REST), so any subset can run independently.
 - **Daily restart after PC reboot**: see [`MORNING-START.md`](./MORNING-START.md)
 - **Step-by-step manual bring-up** (no `start.sh`, do it yourself with status checks at every step): see [`MANUAL-RUN.md`](./MANUAL-RUN.md)
 - **Per-service start / restart commands** (bring up just one piece): see [`START-COMMANDS.md`](./START-COMMANDS.md)
+- **All Artemis addresses, Kafka topics, RabbitMQ queues + manual viewer-queue commands**: see [`QUEUES-AND-TOPICS.md`](./QUEUES-AND-TOPICS.md)
+- **Internals — how messages flow end-to-end**: see [`WORKFLOW.md`](./WORKFLOW.md)
 - **Architecture / why each piece exists**: see [`README.md`](./README.md) and [`CLIENT-REQUEST.md`](./CLIENT-REQUEST.md)
 - **Bridge internals (Camel routes, encryption)**: see [`tms/README.md`](./tms/README.md)
 - **Connector configs**: see [`connect/README.md`](./connect/README.md)
