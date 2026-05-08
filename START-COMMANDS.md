@@ -17,8 +17,10 @@ export MESSAGING_INFRA="$HOME/code/messaging-infra"     # Mac / Linux / WSL
 # Windows Git Bash:  export MESSAGING_INFRA="/c/Users/you/code/messaging-infra"
 # Windows native:    set MESSAGING_INFRA=C:\Users\you\code\messaging-infra
 
-# minikube must be running before anything else can deploy
-minikube start --cpus=4 --memory=6144 --driver=docker
+# minikube must be running before anything else can deploy.
+# 6 CPUs / 8 GB is the minimum — 4/6 causes TLS handshake timeouts when
+# kafka-connect comes up and OOM-kills the API server.
+minikube start --cpus=6 --memory=8192 --driver=docker
 
 # Verify
 kubectl get nodes
@@ -236,6 +238,18 @@ kubectl -n pinkline port-forward svc/pas-scada-demo 8090:8090 &
 
 ## Restart-only (after a code change, no full re-bring-up)
 
+> **Important:** every app's source (Python, Java, HTML) is **baked
+> into the docker image** by its `Dockerfile`. A plain `kubectl rollout
+> restart` re-pulls the SAME image and keeps the OLD code. The
+> rebuild + `minikube image load` + rollout sequence below is required.
+>
+> **Fast path for the SCADA dashboard only:** run `UI_ONLY=1 ./start.sh`
+> from the repo root. It does the rebuild + reload + rollout for
+> `scada-api` in one shot (~30s).
+
+After any rollout, **hard-refresh your browser (Ctrl + F5)** so the
+browser drops cached HTML.
+
 ```bash
 # After Java change → bridge
 docker build -t pinkline/pas-scada-bridge:latest tms/
@@ -244,6 +258,7 @@ minikube image load pinkline/pas-scada-bridge:latest
 kubectl -n pinkline rollout restart deploy/pas-scada-bridge
 
 # After scada-api/app.py or dashboard.html change
+# (or just run:  UI_ONLY=1 ./start.sh  — same thing, one command)
 docker build \
   -t ghcr.io/thirunavukkarasuthangaraj/pas-scada-api:latest \
   external-scada/scada-api/

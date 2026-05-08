@@ -71,6 +71,44 @@ Re-run until everything shows `1/1 Running`.
 
 ---
 
+## Step 4b · Did you edit dashboard.html / app.py? (rebuild required)
+
+**SKIP this step if you didn't change any code overnight.**
+
+The SCADA dashboard (`external-scada/scada-api/static/dashboard.html`)
+and `app.py` are **baked into the docker image at build time**. A plain
+pod restart will keep serving the **old UI** because k8s pulls the same
+image. To pick up your edits you must rebuild → reload → roll out.
+
+**Easy way — fast-path script (Git Bash):**
+
+```bash
+cd /d/pinkline/PAS-SCADA-Kafka-Bridge
+UI_ONLY=1 ./start.sh
+```
+
+Takes ~30 seconds. Skips everything except the scada-api rebuild + rollout.
+
+**Manual way (PowerShell):**
+
+```powershell
+cd D:\pinkline\PAS-SCADA-Kafka-Bridge
+docker build -t ghcr.io/thirunavukkarasuthangaraj/pas-scada-api:latest external-scada\scada-api\
+minikube ssh -- "docker rmi -f ghcr.io/thirunavukkarasuthangaraj/pas-scada-api:latest"
+minikube image load ghcr.io/thirunavukkarasuthangaraj/pas-scada-api:latest
+kubectl -n scada rollout restart deploy/scada-api
+kubectl -n scada rollout status  deploy/scada-api --timeout=120s
+```
+
+After the rollout finishes, **hard-refresh the browser (Ctrl + F5)** on
+http://localhost:8091 — a normal refresh may still show a cached copy.
+
+> Same recipe for other components — see [START-COMMANDS.md](./START-COMMANDS.md)
+> "Restart-only" section for `pas-scada-bridge`, `pas-scada-monitor`,
+> `pas-scada-demo`.
+
+---
+
 ## Step 5 · Start port-forwards (so browser works)
 
 Copy this **whole block** into PowerShell and press Enter:
@@ -135,9 +173,11 @@ morning when you re-run Step 2.
 | Browser says "site can't be reached" on localhost:8080 etc. | Port-forwards died. Re-run Step 5. |
 | Port-forward log shows "connection refused" | The pod restarted while the forward was open. Close that minimized window and re-run that single line from Step 5. |
 | Artemis container missing | `& 'C:\Program Files\Docker\Docker\resources\bin\docker.exe' start artemis` |
-| **Dashboard shows old UI / wrong build marker** | Leftover host docker container shadowing the port-forward. See section below. |
+| **Dashboard shows old UI after you edited code** | Image wasn't rebuilt — see Step 4b above. The dashboard is baked into the docker image; a plain restart keeps the old one. Run `UI_ONLY=1 ./start.sh`. |
+| **Dashboard shows old UI / wrong build marker** (no code change) | Leftover host docker container shadowing the port-forward. See section below. |
 | **Artemis console shows no messages on TMS.PISInfo / SCADA.TMS.Alarms** | Multicast topics drain to subscribers and discard. Use Kafdrop instead — see "Where to actually see message flow" below. |
 | Kafka pod in `Error` with `InconsistentClusterIdException` | See **Kafka cluster ID mismatch** below. |
+| **`start.sh` hangs at "Waiting for Kafka Connect REST API" with `TLS handshake timeout`** | minikube ran out of RAM and the API server died. See **Minikube ran out of RAM** below — the fix is to bump it to 6 CPUs / 8 GB. |
 | Everything is wrong, nuke and restart | `& $env:USERPROFILE\minikube.exe stop` then start again |
 
 ---
@@ -333,6 +373,54 @@ Then re-run the relevant port-forward line from Step 5.
 build marker like `[BUILD-MARKER-A1]` near the title. Compare against
 `external-scada/scada-api/static/dashboard.html:363` — if they don't
 match, the running container is stale.
+
+---
+
+## Minikube ran out of RAM (TLS handshake timeout during start.sh)
+
+If `start.sh` hangs forever at **"Waiting for Kafka Connect REST API"**
+with repeating `net/http: TLS handshake timeout` against `127.0.0.1:<port>`,
+that means `kubectl` cannot reach the minikube API server. The API server
+itself was OOM-killed because adding kafka-connect (heavy ~1.5 GB JVM)
+on top of the rest of the stack pushed minikube past its 6 GB limit.
+
+**Required minimum: 6 CPUs / 8 GB RAM.** The script defaults to this since
+2026-05-09. An older minikube created with `--memory=6144` keeps those
+limits forever — recreate it.
+
+### Recover (PowerShell, since Git Bash will hang on `minikube` calls)
+
+```powershell
+# 1. Stop the broken cluster (or force-kill if minikube stop hangs)
+& $env:USERPROFILE\minikube.exe stop
+# If that hangs > 60s:
+docker stop minikube
+docker rm   minikube
+
+# 2. Recreate with bigger budget. If minikube refuses to change memory
+#    on an existing cluster, delete first.
+& $env:USERPROFILE\minikube.exe delete
+& $env:USERPROFILE\minikube.exe start --cpus=6 --memory=8192 --driver=docker
+```
+
+### Make sure Docker Desktop has headroom
+
+Open **Docker Desktop → Settings → Resources** and confirm:
+
+- **Memory ≥ 10 GB** (gives minikube its 8 GB plus 2 GB overhead)
+- **CPUs ≥ 6**
+
+Apply, then wait for Docker Desktop to restart.
+
+### Re-run start.sh
+
+```bash
+cd /d/pinkline/PAS-SCADA-Kafka-Bridge
+./start.sh
+```
+
+The script is idempotent. PVC data is gone after `minikube delete`, but
+topics auto-recreate and `start.sh` re-declares the RabbitMQ queue.
 
 ---
 

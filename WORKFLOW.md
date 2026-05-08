@@ -332,7 +332,7 @@ which source.
    │     "scada/tms/alarms" → routingKey "scada.tms.alarms"           │
    │     bound to queue "scada.tms.alarms.queue"                      │
    └────────┬─────────────────────────────────────────────────────────┘
-            │ AMQP
+            │ 
             ▼
    ┌──────────────────────────────────────────────────────────────────┐
    │  KAFKA CONNECT  ─  scada-rabbitmq-source connector               │

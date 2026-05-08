@@ -60,15 +60,19 @@ saves time:
 ```bash
 cd /d/pinkline/PAS-SCADA-Kafka-Bridge
 export MESSAGING_INFRA="/d/pinkline/messaging-infra"
-minikube start --cpus=4 --memory=6144 --driver=docker
+minikube start --cpus=6 --memory=8192 --driver=docker
 ```
 
 ### Run — PowerShell equivalent
 ```powershell
 cd D:\pinkline\PAS-SCADA-Kafka-Bridge
 $env:MESSAGING_INFRA = "D:\pinkline\messaging-infra"
-minikube start --cpus=4 --memory=6144 --driver=docker
+minikube start --cpus=6 --memory=8192 --driver=docker
 ```
+
+> 6 CPUs / 8 GB is the minimum for the full stack — kafka + connect +
+> bridge alone want ~4 GB of JVM heap. 4 CPUs / 6 GB causes TLS handshake
+> timeouts and OOM-kills the API server when kafka-connect rolls out.
 
 ### Check
 ```bash
@@ -82,7 +86,7 @@ ls $MESSAGING_INFRA/docker-compose.yml  # expect: file exists
 | Symptom | Fix |
 |---|---|
 | `docker: command not found` / daemon error | Start Docker Desktop (whale icon in tray). Wait until it shows "running". |
-| `minikube start` warns **"You cannot change the memory/CPUs for an existing minikube cluster"** | Cosmetic — using existing cluster's settings. To apply new sizes: `minikube delete` first, then `minikube start --cpus=4 --memory=6144 --driver=docker`. |
+| `minikube start` warns **"You cannot change the memory/CPUs for an existing minikube cluster"** | Cosmetic — using existing cluster's settings. To apply new sizes: `minikube delete` first, then `minikube start --cpus=6 --memory=8192 --driver=docker`. |
 | `minikube start` hangs / errors | `minikube delete` then retry. If still failing, check VT-x/virtualization is enabled in BIOS. |
 | `kubectl get nodes` → `Unable to connect` | `minikube status`. If stopped → `minikube start`. If context wrong → `kubectl config use-context minikube`. |
 | `kubectl` warning **"version 1.30.x may have incompatibilities with Kubernetes 1.35.x"** | Cosmetic for most operations. To silence: install matching kubectl, or use `minikube kubectl -- <cmd>`. |
@@ -534,6 +538,16 @@ curl -s localhost:8091/api/status
 ```
 
 ### Restart one thing without redoing everything
+
+> **Why a plain `kubectl rollout restart` doesn't show your edits:**
+> the dashboard.html / app.py / monitor.py / demo templates are **baked
+> into the docker image at build time**. A restart re-pulls the SAME
+> image, so the pod keeps serving the OLD code. You MUST rebuild the
+> image, force-replace it inside minikube, then roll out.
+
+> **Fast path for the SCADA dashboard:** `UI_ONLY=1 ./start.sh` runs
+> just the rebuild + reload + rollout for `scada-api`. ~30 seconds.
+
 ```bash
 # Bridge after Java change
 docker build -t pinkline/pas-scada-bridge:latest tms/
@@ -542,6 +556,7 @@ minikube image load pinkline/pas-scada-bridge:latest
 kubectl -n pinkline rollout restart deploy/pas-scada-bridge
 
 # scada-api after app.py / dashboard.html change
+# (or just run:  UI_ONLY=1 ./start.sh  — same thing)
 docker build -t ghcr.io/thirunavukkarasuthangaraj/pas-scada-api:latest external-scada/scada-api/
 minikube ssh -- "docker rmi -f ghcr.io/thirunavukkarasuthangaraj/pas-scada-api:latest"
 minikube image load ghcr.io/thirunavukkarasuthangaraj/pas-scada-api:latest

@@ -460,84 +460,84 @@ pre, code, .json {
   </div>
 </header>
 
-<!-- ── Flow diagram — both directions ── -->
+<!-- ── Flow diagram — forward (top) + reverse (bottom) lanes through same hops ── -->
 <div class="flow-wrap">
-  <svg class="flow-svg" viewBox="0 0 1200 170" xmlns="http://www.w3.org/2000/svg">
+  <svg class="flow-svg" viewBox="0 0 1200 130" xmlns="http://www.w3.org/2000/svg">
+
+    <defs>
+      <marker id="arrow-fwd" viewBox="0 0 6 5" refX="5" refY="2.5"
+              markerWidth="5" markerHeight="4" orient="auto">
+        <path d="M 0 0 L 5 2.5 L 0 5 z" fill="#38bdf8"/>
+      </marker>
+      <marker id="arrow-rev" viewBox="0 0 6 5" refX="5" refY="2.5"
+              markerWidth="5" markerHeight="4" orient="auto">
+        <path d="M 0 0 L 5 2.5 L 0 5 z" fill="#a78bfa"/>
+      </marker>
+    </defs>
 
     <!-- Direction labels -->
-    <text x="10" y="15" style="font:700 10px var(--font);fill:#38bdf8;">▶ TMS → SCADA (inbound encrypted messages)</text>
-    <text x="10" y="155" style="font:700 10px var(--font);fill:#a78bfa;">◀ SCADA → TMS (UpdateAlarm · KeepAlive · SendAllAlarms · GetAllAlarms)</text>
+    <text x="10" y="11" style="font:700 10px var(--font);fill:#38bdf8;">▶ TMS → SCADA · forward (encrypted XML → JSON over MQTT)</text>
+    <text x="10" y="125" style="font:700 10px var(--font);fill:#a78bfa;">◀ SCADA → TMS · reverse (UpdateAlarm · KeepAlive · SendAllAlarms · GetAllAlarms)</text>
 
-    <!-- ── Inbound row (top) ── -->
-    <!-- TMS Server -->
+    <!-- ── Nodes (shared by forward + reverse) ── -->
     <g id="node-tms" class="fnode" transform="translate(10,22)">
-      <rect width="155" height="58" rx="6"/>
-      <text x="77" y="18" text-anchor="middle" class="flabel">TMS Server</text>
-      <text x="77" y="32" text-anchor="middle" class="fproto">OpenWire :61616</text>
-      <text x="77" y="47" text-anchor="middle" class="frate" id="rate-tms">— msg/s</text>
+      <rect width="155" height="70" rx="6"/>
+      <text x="77" y="22" text-anchor="middle" class="flabel">TMS Server</text>
+      <text x="77" y="40" text-anchor="middle" class="fproto">Artemis · OpenWire :61616</text>
+      <text x="77" y="58" text-anchor="middle" class="frate" id="rate-tms">— msg/s</text>
     </g>
-    <!-- → Bridge -->
-    <path id="pipe-1" class="fpipe" d="M 165 51 L 255 51"/>
-    <g id="pkt-1" style="display:none"><circle class="pkt-in" r="4"><animateMotion dur="1.2s" repeatCount="indefinite" path="M 165 51 L 255 51"/></circle></g>
-    <text x="210" y="44" text-anchor="middle" style="font:8px var(--mono);fill:#38bdf8;">XML</text>
-
-    <!-- Bridge -->
     <g class="fnode" transform="translate(255,22)">
-      <rect width="170" height="58" rx="6"/>
-      <text x="85" y="18" text-anchor="middle" class="flabel">Bridge</text>
-      <text x="85" y="32" text-anchor="middle" class="fproto">XML→JSON→AES-256-GCM</text>
-      <text x="85" y="47" text-anchor="middle" class="frate">Artemis→Kafka→RMQ</text>
+      <rect width="170" height="70" rx="6"/>
+      <text x="85" y="22" text-anchor="middle" class="flabel">Bridge</text>
+      <text x="85" y="40" text-anchor="middle" class="fproto">XML↔JSON · AES-256-GCM</text>
+      <text x="85" y="58" text-anchor="middle" class="fproto">Artemis ↔ Kafka ↔ RMQ</text>
     </g>
-    <!-- → Kafka -->
-    <path id="pipe-2" class="fpipe" d="M 425 51 L 510 51"/>
-    <g id="pkt-2" style="display:none"><circle class="pkt-in" r="4"><animateMotion dur="1.2s" repeatCount="indefinite" path="M 425 51 L 510 51"/></circle></g>
-    <text x="467" y="44" text-anchor="middle" style="font:8px var(--mono);fill:#38bdf8;">encrypted</text>
-
-    <!-- Kafka -->
     <g class="fnode" transform="translate(510,22)">
-      <rect width="150" height="58" rx="6"/>
-      <text x="75" y="18" text-anchor="middle" class="flabel">Kafka</text>
-      <text x="75" y="32" text-anchor="middle" class="fproto">tms.scada.encrypted</text>
-      <text x="75" y="47" text-anchor="middle" class="frate">byte[] store</text>
+      <rect width="150" height="70" rx="6"/>
+      <text x="75" y="22" text-anchor="middle" class="flabel">Kafka</text>
+      <text x="75" y="40" text-anchor="middle" class="fproto">tms.scada.encrypted</text>
+      <text x="75" y="58" text-anchor="middle" class="fproto">scada.tms.raw / processed</text>
     </g>
-    <!-- → RabbitMQ -->
-    <path id="pipe-3" class="fpipe" d="M 660 51 L 750 51"/>
-    <g id="pkt-3" style="display:none"><circle class="pkt-in" r="4"><animateMotion dur="1.2s" repeatCount="indefinite" path="M 660 51 L 750 51"/></circle></g>
-    <text x="705" y="44" text-anchor="middle" style="font:8px var(--mono);fill:#38bdf8;">AMQP</text>
-
-    <!-- RabbitMQ -->
     <g class="fnode" transform="translate(750,22)">
-      <rect width="185" height="58" rx="6"/>
-      <text x="92" y="18" text-anchor="middle" class="flabel">RabbitMQ (SCADA VM)</text>
-      <text x="92" y="32" text-anchor="middle" class="fproto">AMQP 5673 · MQTT 1884</text>
-      <text x="92" y="47" text-anchor="middle" class="frate">amq.topic</text>
+      <rect width="185" height="70" rx="6"/>
+      <text x="92" y="22" text-anchor="middle" class="flabel">RabbitMQ (SCADA VM)</text>
+      <text x="92" y="40" text-anchor="middle" class="fproto">AMQP 5673 · MQTT 1884</text>
+      <text x="92" y="58" text-anchor="middle" class="frate">amq.topic</text>
     </g>
-    <!-- → SCADA -->
-    <path id="pipe-4" class="fpipe" d="M 935 51 L 1020 51"/>
-    <g id="pkt-4" style="display:none"><circle class="pkt-in" r="4"><animateMotion dur="1.2s" repeatCount="indefinite" path="M 935 51 L 1020 51"/></circle></g>
-    <text x="977" y="44" text-anchor="middle" style="font:8px var(--mono);fill:#38bdf8;">MQTT</text>
-
-    <!-- SCADA (this app) -->
     <g id="node-scada" class="fnode" transform="translate(1020,22)">
-      <rect width="165" height="58" rx="6"/>
-      <text x="82" y="18" text-anchor="middle" class="flabel">SCADA API (this app)</text>
-      <text x="82" y="32" text-anchor="middle" class="fproto">Decrypt · Display · Publish</text>
-      <text x="82" y="47" text-anchor="middle" class="frate" id="rate-scada">— msg/s</text>
+      <rect width="165" height="70" rx="6"/>
+      <text x="82" y="22" text-anchor="middle" class="flabel">SCADA API (this app)</text>
+      <text x="82" y="40" text-anchor="middle" class="fproto">Decrypt · Display · Publish</text>
+      <text x="82" y="58" text-anchor="middle" class="frate" id="rate-scada">— msg/s</text>
     </g>
 
-    <!-- ── Outbound row (bottom) — SCADA → TMS ── -->
-    <!-- Return pipe: wide dashed purple arc -->
-    <path id="pipe-out" class="fpipe" d="M 1020 80 Q 600 118 165 80" stroke-dasharray="5 3"/>
-    <g id="pkt-out" style="display:none">
-      <circle class="pkt-out" r="4">
-        <animateMotion dur="2.2s" repeatCount="indefinite"
-          path="M 1020 80 Q 600 118 165 80"/>
-      </circle>
-    </g>
-    <!-- Label on the arc -->
-    <text x="600" y="138" text-anchor="middle" style="font:9px var(--mono);fill:#a78bfa;">
-      scada/tms/alarms  ·  UpdateAlarm  ·  KeepAlive  ·  SendAllAlarms  ·  GetAllAlarms
-    </text>
+    <!-- ── Forward pipes (upper lane, sky blue, → ) ── -->
+    <path id="pipe-1" class="fpipe" d="M 165 47 L 252 47" marker-end="url(#arrow-fwd)"/>
+    <path id="pipe-2" class="fpipe" d="M 425 47 L 507 47" marker-end="url(#arrow-fwd)"/>
+    <path id="pipe-3" class="fpipe" d="M 660 47 L 747 47" marker-end="url(#arrow-fwd)"/>
+    <path id="pipe-4" class="fpipe" d="M 935 47 L 1017 47" marker-end="url(#arrow-fwd)"/>
+    <text x="208" y="42" text-anchor="middle" style="font:8px var(--mono);fill:#38bdf8;">XML</text>
+    <text x="466" y="42" text-anchor="middle" style="font:8px var(--mono);fill:#38bdf8;">encrypted</text>
+    <text x="703" y="42" text-anchor="middle" style="font:8px var(--mono);fill:#38bdf8;">AMQP</text>
+    <text x="976" y="42" text-anchor="middle" style="font:8px var(--mono);fill:#38bdf8;">MQTT</text>
+    <g id="pkt-1" style="display:none"><circle class="pkt-in" r="3.5"><animateMotion dur="1.2s" repeatCount="indefinite" path="M 165 47 L 252 47"/></circle></g>
+    <g id="pkt-2" style="display:none"><circle class="pkt-in" r="3.5"><animateMotion dur="1.2s" repeatCount="indefinite" path="M 425 47 L 507 47"/></circle></g>
+    <g id="pkt-3" style="display:none"><circle class="pkt-in" r="3.5"><animateMotion dur="1.2s" repeatCount="indefinite" path="M 660 47 L 747 47"/></circle></g>
+    <g id="pkt-4" style="display:none"><circle class="pkt-in" r="3.5"><animateMotion dur="1.2s" repeatCount="indefinite" path="M 935 47 L 1017 47"/></circle></g>
+
+    <!-- ── Reverse pipes (lower lane, purple, ← ) ── -->
+    <path id="pipe-out-4" class="fpipe" d="M 1020 75 L 938 75" marker-end="url(#arrow-rev)"/>
+    <path id="pipe-out-3" class="fpipe" d="M 750  75 L 663 75" marker-end="url(#arrow-rev)"/>
+    <path id="pipe-out-2" class="fpipe" d="M 510  75 L 428 75" marker-end="url(#arrow-rev)"/>
+    <path id="pipe-out-1" class="fpipe" d="M 255  75 L 168 75" marker-end="url(#arrow-rev)"/>
+    <text x="976" y="86" text-anchor="middle" style="font:8px var(--mono);fill:#a78bfa;">MQTT</text>
+    <text x="703" y="86" text-anchor="middle" style="font:8px var(--mono);fill:#a78bfa;">AMQP→Kafka</text>
+    <text x="466" y="86" text-anchor="middle" style="font:8px var(--mono);fill:#a78bfa;">scada.tms.raw</text>
+    <text x="208" y="86" text-anchor="middle" style="font:8px var(--mono);fill:#a78bfa;">JMS→Artemis</text>
+    <g id="pkt-out-4" style="display:none"><circle class="pkt-out" r="3.5"><animateMotion dur="1.6s" repeatCount="indefinite" path="M 1020 75 L 938 75"/></circle></g>
+    <g id="pkt-out-3" style="display:none"><circle class="pkt-out" r="3.5"><animateMotion dur="1.6s" repeatCount="indefinite" path="M 750  75 L 663 75"/></circle></g>
+    <g id="pkt-out-2" style="display:none"><circle class="pkt-out" r="3.5"><animateMotion dur="1.6s" repeatCount="indefinite" path="M 510  75 L 428 75"/></circle></g>
+    <g id="pkt-out-1" style="display:none"><circle class="pkt-out" r="3.5"><animateMotion dur="1.6s" repeatCount="indefinite" path="M 255  75 L 168 75"/></circle></g>
   </svg>
 </div>
 
@@ -897,9 +897,13 @@ function renderMetrics(){
   ['pipe-1','pipe-2','pipe-3','pipe-4'].forEach(id => {
     const el = $(id); if(el){ el.classList.toggle('in-active', inFlow); el.classList.remove('out-active'); }
   });
-  const po = $('pipe-out'); if(po) po.classList.toggle('out-active', outFlow);
-  for(let i=1;i<=4;i++) { const p=$('pkt-'+i); if(p) p.style.display=inFlow?'block':'none'; }
-  const po2=$('pkt-out'); if(po2) po2.style.display=outFlow?'block':'none';
+  ['pipe-out-1','pipe-out-2','pipe-out-3','pipe-out-4'].forEach(id => {
+    const el = $(id); if(el){ el.classList.toggle('out-active', outFlow); el.classList.remove('in-active'); }
+  });
+  for(let i=1;i<=4;i++) {
+    const p = $('pkt-'+i);     if(p) p.style.display = inFlow  ? 'block' : 'none';
+    const o = $('pkt-out-'+i); if(o) o.style.display = outFlow ? 'block' : 'none';
+  }
 }
 
 // ── API ──

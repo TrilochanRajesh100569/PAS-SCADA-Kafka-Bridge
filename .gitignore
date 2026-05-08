@@ -34,3 +34,6 @@ __pycache__/
 
 # Logs
 *.log
+
+# Runtime port-forward state (created by start.sh)
+.port-forwards/

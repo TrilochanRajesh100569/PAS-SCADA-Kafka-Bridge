@@ -18,6 +18,11 @@
 #   MANUAL-RUN.md         — step-by-step alternative to this script
 #   QUEUES-AND-TOPICS.md  — every Artemis address, Kafka topic, RabbitMQ
 #                           queue + manual viewer-queue create commands
+#
+# Quick fast paths:
+#   UI_ONLY=1 ./start.sh  — rebuild + roll out scada-api only (dashboard edits)
+#   START_PF=0 ./start.sh — bring stack up, but skip auto-port-forwards
+#   SKIP_ARTEMIS=1 ./start.sh — prod mode (use remote Artemis)
 
 set -euo pipefail
 
@@ -29,6 +34,15 @@ MESSAGING_INFRA="${MESSAGING_INFRA:-/d/pinkline/messaging-infra}"
 # Set START_PF=0 to skip the auto-port-forward block at the end (e.g. if you
 # already have your own port-forwards running, or you only want the cluster up).
 START_PF="${START_PF:-1}"
+
+# UI_ONLY=1 — fast path for dashboard.html / app.py edits.
+# Skips Artemis, Kafka, Connect, bridge, monitor, demo. Just:
+#   rebuild scada-api image → load into minikube → rollout restart scada-api.
+# Use this when the rest of the stack is already up and you only changed
+# the SCADA dashboard. ~30s vs ~5min for a full re-run.
+#
+#   UI_ONLY=1 ./start.sh
+UI_ONLY="${UI_ONLY:-0}"
 
 # ════════════════════════════════════════════════════════════════════════
 # PROD / CLOUD-SERVER MODE
@@ -99,6 +113,86 @@ ok()   { printf '\033[1;32m  ✓ %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m  ! %s\033[0m\n' "$*"; }
 die()  { printf '\033[1;31m  ✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
+# ── Preflight: docker daemon ────────────────────────────────────────────
+# Fail loudly at the top instead of producing dozens of "failed to connect
+# to docker API" errors deeper in. Common cause: Docker Desktop not started.
+if ! docker info >/dev/null 2>&1; then
+  die "Docker daemon not reachable.
+
+    Open Docker Desktop from the Start menu and wait until the whale
+    icon (system tray) stops animating — usually 30-60 seconds.
+    Verify with:  docker ps
+    Then re-run this script."
+fi
+
+# ── Preflight: locate minikube binary ───────────────────────────────────
+# Some Windows installers leave a non-executable stub at
+# C:\WINDOWS\system32\minikube which Git Bash picks up first via PATH and
+# fails with "Permission denied". Prefer the real binary at
+# %USERPROFILE%\minikube.exe (matches MORNING-START.md), then fall back
+# to PATH lookup.
+MINIKUBE=""
+if [ -n "${USERPROFILE:-}" ] && [ -x "${USERPROFILE}/minikube.exe" ]; then
+  MINIKUBE="${USERPROFILE}/minikube.exe"
+elif [ -n "${HOME:-}" ] && [ -x "${HOME}/minikube.exe" ]; then
+  MINIKUBE="${HOME}/minikube.exe"
+elif command -v minikube.exe >/dev/null 2>&1; then
+  MINIKUBE="$(command -v minikube.exe)"
+elif command -v minikube >/dev/null 2>&1; then
+  CAND="$(command -v minikube)"
+  if [ -x "$CAND" ] && [ -s "$CAND" ]; then
+    MINIKUBE="$CAND"
+  fi
+fi
+[ -n "$MINIKUBE" ] || die "minikube binary not found.
+
+    Install from https://minikube.sigs.k8s.io/docs/start/ and place it
+    at %USERPROFILE%\\minikube.exe (the path MORNING-START.md uses).
+    If you have one already, check it isn't shadowed by a 0-byte stub
+    at C:\\WINDOWS\\system32\\minikube — delete that stub if so."
+
+# Wrapper so the rest of the script can keep saying `minikube ...` —
+# every invocation goes through the resolved binary.
+minikube() { "$MINIKUBE" "$@"; }
+
+# ════════════════════════════════════════════════════════════════════════
+# UI-ONLY FAST PATH
+# ════════════════════════════════════════════════════════════════════════
+# If you only edited external-scada/scada-api/static/dashboard.html or
+# app.py, rebuild the scada-api image, load it into minikube, and roll
+# out the deployment — nothing else. Takes ~30 seconds.
+#
+# Why this exists: the dashboard is BAKED INTO the docker image at build
+# time (Dockerfile: COPY static/ ./static/). A plain `kubectl rollout
+# restart` re-pulls the SAME image and shows the OLD UI. You MUST rebuild.
+# ════════════════════════════════════════════════════════════════════════
+if [ "$UI_ONLY" = "1" ]; then
+  log "UI_ONLY=1 — rebuilding scada-api only (dashboard.html / app.py edits)"
+
+  # --no-cache here on purpose: BuildKit on Windows + WSL2 has been
+  # observed to falsely cache the COPY static/ layer after a wsl
+  # --shutdown, leaving the pod with the OLD dashboard. UI_ONLY is the
+  # "I edited the UI, take my changes" path — never trust the cache.
+  log "Building SCADA API image (no-cache)"
+  docker build --no-cache -q \
+    -t ghcr.io/thirunavukkarasuthangaraj/pas-scada-api:latest \
+    -t external-scada-scada-api:latest \
+    "$SCRIPT_DIR/external-scada/scada-api/" >/dev/null
+  ok "scada-api image built"
+
+  log "Force-replacing image inside minikube"
+  minikube ssh -- "docker rmi -f ghcr.io/thirunavukkarasuthangaraj/pas-scada-api:latest" >/dev/null 2>&1 || true
+  minikube image load ghcr.io/thirunavukkarasuthangaraj/pas-scada-api:latest >/dev/null \
+    && ok "image loaded into minikube" \
+    || die "minikube image load failed"
+
+  log "Rolling out scada-api"
+  kubectl -n scada rollout restart deploy/scada-api
+  kubectl -n scada rollout status  deploy/scada-api --timeout=120s
+  ok "scada-api rolled out — dashboard at http://localhost:8091 (Ctrl+F5 in browser)"
+  exit 0
+fi
+
 # ── 0. Kill rogue host containers that bind ports we'll port-forward ────
 # A previous standalone `docker run` of scada-api / monitor / etc. can keep
 # binding 0.0.0.0:8091 etc. after we move to k8s. Chrome then hits the old
@@ -131,8 +225,11 @@ log "Checking minikube"
 if minikube status 2>/dev/null | grep -q "host: Running"; then
   ok "minikube already running"
 else
-  minikube start --cpus=4 --memory=6144 --driver=docker
-  ok "minikube started"
+  # 6 CPUs / 8 GB is the minimum for the full stack — kafka + connect +
+  # bridge alone want ~4 GB of JVM heap. 4 CPUs / 6 GB caused TLS handshake
+  # timeouts and OOM-killed the API server on first run (2026-05-09).
+  minikube start --cpus=6 --memory=8192 --driver=docker
+  ok "minikube started (6 CPUs, 8 GB RAM)"
 fi
 
 # ── 2. Artemis (Docker on host) ─────────────────────────────────────────
@@ -166,9 +263,12 @@ docker build -q -t pinkline/pas-scada-bridge:latest "$SCRIPT_DIR/tms/" >/dev/nul
 ok "bridge image built"
 
 # ── 4. Build SCADA API image from current source ────────────────────────
-# Always rebuild so app.py edits ship into the running pod. Layers are
-# cached so this is cheap when nothing changed.
-log "Building SCADA API image"
+# Always rebuild so dashboard.html / app.py edits ship into the running
+# pod. The dashboard is baked into the image (Dockerfile COPYs static/),
+# so without a rebuild the pod keeps serving the old UI even after a
+# rollout restart. Layer cache keeps this cheap when nothing changed.
+# (Tip: for a UI-only fast path, run `UI_ONLY=1 ./start.sh`.)
+log "Building SCADA API image (picks up dashboard.html / app.py edits)"
 docker build -q \
   -t ghcr.io/thirunavukkarasuthangaraj/pas-scada-api:latest \
   -t external-scada-scada-api:latest \
