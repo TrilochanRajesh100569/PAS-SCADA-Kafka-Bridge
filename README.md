@@ -484,12 +484,32 @@ PAS-SCADA-Kafka-Bridge/
 For day-to-day work on a single module, the per-module README has the
 detail. This README covers the system; those cover the parts.
 
+### Module READMEs (live next to the code)
+
 * [`tms/`](tms/) — Spring Boot Camel app source, processors, routes
 * [`monitor/README.md`](monitor/README.md) — health monitor internals, FastAPI endpoints, SMTP config, alert templates
 * [`connect/README.md`](connect/README.md) — full connector list, Camel Kamelet limitations, Connect REST API cheatsheet
 * [`bootstrap/README.md`](bootstrap/README.md) — Kafka topic spec, RabbitMQ queue declare, customizing for a different cluster
 * [`demo/README.md`](demo/README.md) — synthetic-vs-live mode, custom demo scripts, embedding in the customer pitch
 * [`external-scada/scada-api/README.md`](external-scada/scada-api/README.md) — SCADA simulator endpoints
+
+### Operations & deployment guides (in [`docs/`](docs/))
+
+| Document | Use when |
+|---|---|
+| [`docs/MORNING-START.md`](docs/MORNING-START.md) | Daily restart routine after PC reboot |
+| [`docs/FRESH-PC-SETUP.md`](docs/FRESH-PC-SETUP.md) | First-time bring-up walkthrough |
+| [`docs/MANUAL-RUN.md`](docs/MANUAL-RUN.md) | Step-by-step manual bring-up with checks at every step |
+| [`docs/START-COMMANDS.md`](docs/START-COMMANDS.md) | Per-service start / restart commands |
+| [`docs/WORKFLOW.md`](docs/WORKFLOW.md) | How data flows end-to-end through every component |
+| [`docs/QUEUES-AND-TOPICS.md`](docs/QUEUES-AND-TOPICS.md) | Every Artemis address, Kafka topic, RabbitMQ queue |
+| [`docs/PROD-DEPLOY.md`](docs/PROD-DEPLOY.md) | Production cloud-server deployment |
+| [`docs/VM-DEPLOY.md`](docs/VM-DEPLOY.md) | Two-VM deployment overview (TMS + SCADA) |
+| [`docs/TMS-LINUX-VM.md`](docs/TMS-LINUX-VM.md) | TMS-side VM bring-up (Linux) |
+| [`docs/SCADA-WINDOWS-VM.md`](docs/SCADA-WINDOWS-VM.md) | SCADA-side VM bring-up (Windows) |
+| [`docs/MONITOR-VM.md`](docs/MONITOR-VM.md) | Health-monitor VM deployment |
+| [`docs/DEMO-SCENARIOS.md`](docs/DEMO-SCENARIOS.md) | **Client-demo runbook** — failure scenarios, alarm sound, zero-loss recovery |
+| [`docs/CLIENT-REQUEST.md`](docs/CLIENT-REQUEST.md) | Original client requirements + architecture rationale |
 
 ---
 

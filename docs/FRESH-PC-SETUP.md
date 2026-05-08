@@ -460,9 +460,9 @@ the source of env vars changes.
 - **Per-service start / restart commands** (bring up just one piece): see [`START-COMMANDS.md`](./START-COMMANDS.md)
 - **All Artemis addresses, Kafka topics, RabbitMQ queues + manual viewer-queue commands**: see [`QUEUES-AND-TOPICS.md`](./QUEUES-AND-TOPICS.md)
 - **Internals — how messages flow end-to-end**: see [`WORKFLOW.md`](./WORKFLOW.md)
-- **Architecture / why each piece exists**: see [`README.md`](./README.md) and [`CLIENT-REQUEST.md`](./CLIENT-REQUEST.md)
-- **Bridge internals (Camel routes, encryption)**: see [`tms/README.md`](./tms/README.md)
-- **Connector configs**: see [`connect/README.md`](./connect/README.md)
+- **Architecture / why each piece exists**: see [`README.md`](../README.md) and [`CLIENT-REQUEST.md`](./CLIENT-REQUEST.md)
+- **Bridge internals (Camel routes, encryption)**: see [`tms/README.md`](../tms/README.md)
+- **Connector configs**: see [`connect/README.md`](../connect/README.md)
 - **VM / production deployment** (different topic, not for fresh PC dev):
   see `VM-DEPLOY.md`, `TMS-LINUX-VM.md`, `MONITOR-VM.md`, `SCADA-WINDOWS-VM.md`
 

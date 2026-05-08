@@ -11,12 +11,12 @@
 # Prerequisites: docker, minikube, kubectl on PATH.
 #
 # Companion docs:
-#   FRESH-PC-SETUP.md     — first-time bring-up walkthrough
-#   MORNING-START.md      — daily restart routine after PC reboot
-#   PROD-DEPLOY.md        — production cloud-server deployment guide
-#   WORKFLOW.md           — what each component does and how data flows
-#   MANUAL-RUN.md         — step-by-step alternative to this script
-#   QUEUES-AND-TOPICS.md  — every Artemis address, Kafka topic, RabbitMQ
+#   docs/FRESH-PC-SETUP.md     — first-time bring-up walkthrough
+#   docs/MORNING-START.md      — daily restart routine after PC reboot
+#   docs/PROD-DEPLOY.md        — production cloud-server deployment guide
+#   docs/WORKFLOW.md           — what each component does and how data flows
+#   docs/MANUAL-RUN.md         — step-by-step alternative to this script
+#   docs/QUEUES-AND-TOPICS.md  — every Artemis address, Kafka topic, RabbitMQ
 #                           queue + manual viewer-queue create commands
 #
 # Quick fast paths:
@@ -27,7 +27,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-# Default MESSAGING_INFRA matches FRESH-PC-SETUP.md / MANUAL-RUN.md.
+# Default MESSAGING_INFRA matches docs/FRESH-PC-SETUP.md / docs/MANUAL-RUN.md.
 # Override by exporting MESSAGING_INFRA before invoking this script.
 MESSAGING_INFRA="${MESSAGING_INFRA:-/d/pinkline/messaging-infra}"
 
@@ -86,9 +86,14 @@ if [ -n "${ARTEMIS_HOST:-}" ] && [ -n "${ARTEMIS_PORT:-}" ]; then
 fi
 ARTEMIS_BROKER_URL="${ARTEMIS_BROKER_URL:-tcp://host.minikube.internal:61616}"
 
-ARTEMIS_USER="${ARTEMIS_USER:-pasbridge}"
+# Dev defaults match messaging-infra/docker-compose.yml (admin/admin).
+# In prod, override via env vars before invoking this script — the
+# header comment above shows the full prod command. Using pasbridge/
+# testpass123 here would cause AMQ229031 auth errors against the dev
+# Artemis broker, breaking the bridge's /api/tms-publish endpoint.
+ARTEMIS_USER="${ARTEMIS_USER:-admin}"
 # Accept either ARTEMIS_PASSWORD or ARTEMIS_PASS (matches .env.template).
-ARTEMIS_PASSWORD="${ARTEMIS_PASSWORD:-${ARTEMIS_PASS:-testpass123}}"
+ARTEMIS_PASSWORD="${ARTEMIS_PASSWORD:-${ARTEMIS_PASS:-admin}}"
 
 RABBITMQ_USER="${RABBITMQ_USER:-thiru}"
 RABBITMQ_PASS="${RABBITMQ_PASS:-password}"
@@ -129,7 +134,7 @@ fi
 # Some Windows installers leave a non-executable stub at
 # C:\WINDOWS\system32\minikube which Git Bash picks up first via PATH and
 # fails with "Permission denied". Prefer the real binary at
-# %USERPROFILE%\minikube.exe (matches MORNING-START.md), then fall back
+# %USERPROFILE%\minikube.exe (matches docs/MORNING-START.md), then fall back
 # to PATH lookup.
 MINIKUBE=""
 if [ -n "${USERPROFILE:-}" ] && [ -x "${USERPROFILE}/minikube.exe" ]; then
@@ -147,7 +152,7 @@ fi
 [ -n "$MINIKUBE" ] || die "minikube binary not found.
 
     Install from https://minikube.sigs.k8s.io/docs/start/ and place it
-    at %USERPROFILE%\\minikube.exe (the path MORNING-START.md uses).
+    at %USERPROFILE%\\minikube.exe (the path docs/MORNING-START.md uses).
     If you have one already, check it isn't shadowed by a 0-byte stub
     at C:\\WINDOWS\\system32\\minikube — delete that stub if so."
 
@@ -517,11 +522,11 @@ ok "Demo applied"
 # Idempotent: `queue create` errors if the queue already exists, but the
 # `|| true` swallows that so re-runs are safe. Set CREATE_VIEWERS=0 to skip.
 #
-# See QUEUES-AND-TOPICS.md §6 for full details.
+# See docs/QUEUES-AND-TOPICS.md §6 for full details.
 if [ "$SKIP_ARTEMIS" = "1" ]; then
   warn "SKIP_ARTEMIS=1 — skipped viewer-queue creation (no local artemis container)."
   warn "If you want browsable queues against the remote Artemis, run the"
-  warn "create commands from QUEUES-AND-TOPICS.md §6 against the client broker"
+  warn "create commands from docs/QUEUES-AND-TOPICS.md §6 against the client broker"
   warn "(e.g. via kubectl exec into a connect pod and use ./artemis CLI with --url tcp://<remote>:61616)."
 elif [ "${CREATE_VIEWERS:-1}" = "1" ]; then
   log "Creating Artemis viewer queues (idempotent)"
@@ -649,7 +654,7 @@ else
   Browse messages inside Artemis (after viewer queues are created):
     addresses → SCADA.TMS.Alarms → queues → scada-tms-viewer → More ▾ → Browse
     addresses → TMS.PISInfo      → queues → tms-pisinfo-viewer → More ▾ → Browse
-  See QUEUES-AND-TOPICS.md for the full list.
+  See docs/QUEUES-AND-TOPICS.md for the full list.
 
 EOF
 fi
