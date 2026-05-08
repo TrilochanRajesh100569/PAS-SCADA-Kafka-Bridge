@@ -63,9 +63,18 @@ START_PF="${START_PF:-1}"
 #   ./start.sh
 # ════════════════════════════════════════════════════════════════════════
 SKIP_ARTEMIS="${SKIP_ARTEMIS:-0}"
+
+# Accept either ARTEMIS_BROKER_URL (combined) OR ARTEMIS_HOST+ARTEMIS_PORT
+# (split). The split form matches .env.example and Spring Boot conventions.
+if [ -n "${ARTEMIS_HOST:-}" ] && [ -n "${ARTEMIS_PORT:-}" ]; then
+  ARTEMIS_BROKER_URL="${ARTEMIS_BROKER_URL:-tcp://${ARTEMIS_HOST}:${ARTEMIS_PORT}}"
+fi
 ARTEMIS_BROKER_URL="${ARTEMIS_BROKER_URL:-tcp://host.minikube.internal:61616}"
+
 ARTEMIS_USER="${ARTEMIS_USER:-pasbridge}"
-ARTEMIS_PASSWORD="${ARTEMIS_PASSWORD:-testpass123}"
+# Accept either ARTEMIS_PASSWORD or ARTEMIS_PASS (matches .env.example).
+ARTEMIS_PASSWORD="${ARTEMIS_PASSWORD:-${ARTEMIS_PASS:-testpass123}}"
+
 RABBITMQ_USER="${RABBITMQ_USER:-thiru}"
 RABBITMQ_PASS="${RABBITMQ_PASS:-password}"
 MQTT_USER="${MQTT_USER:-thiru}"
@@ -77,6 +86,12 @@ if [ "$SKIP_ARTEMIS" = "1" ] || [ "$ARTEMIS_BROKER_URL" != "tcp://host.minikube.
 else
   IS_PROD=0
 fi
+
+# Parse tcp://host:port into separate fields for the bridge ConfigMap
+# (deployment.yaml uses envFrom to mount these as ARTEMIS_HOST/ARTEMIS_PORT
+# which application-prod.properties resolves via ${ARTEMIS_HOST}:${ARTEMIS_PORT}).
+ARTEMIS_HOST="$(echo "$ARTEMIS_BROKER_URL" | sed -E 's|^tcp://||; s|:.*||')"
+ARTEMIS_PORT="$(echo "$ARTEMIS_BROKER_URL" | sed -E 's|.*:||')"
 
 log()  { printf '\n\033[1;36m▶ %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m  ✓ %s\033[0m\n' "$*"; }
@@ -210,6 +225,19 @@ kubectl apply -f "$SCRIPT_DIR/tms/k8s/20-zookeeper.yaml"
 kubectl apply -f "$SCRIPT_DIR/tms/k8s/30-kafka.yaml"
 kubectl apply -f "$SCRIPT_DIR/tms/k8s/40-kafdrop.yaml"
 kubectl apply -f "$SCRIPT_DIR/tms/k8s/overlay-minikube.yaml"
+
+# In PROD mode, override the bridge-config ConfigMap so ARTEMIS_HOST/PORT
+# point at the client's broker. The overlay above set them to
+# host.minikube.internal:61616 (dev). We re-apply just those keys via
+# kubectl patch so application-prod.properties' ${ARTEMIS_HOST} resolves
+# to the right value.
+if [ "$IS_PROD" = "1" ]; then
+  kubectl -n pinkline patch configmap bridge-config --type merge -p "$(cat <<EOF
+{"data":{"ARTEMIS_HOST":"$ARTEMIS_HOST","ARTEMIS_PORT":"$ARTEMIS_PORT"}}
+EOF
+)"
+  ok "bridge-config patched: ARTEMIS_HOST=$ARTEMIS_HOST ARTEMIS_PORT=$ARTEMIS_PORT"
+fi
 
 # Generate bridge-secret from env vars (works for both dev and prod —
 # defaults match the dev yaml when env vars unset; in prod, env vars

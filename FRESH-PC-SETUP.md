@@ -372,7 +372,84 @@ HTTP REST), so any subset can run independently.
 
 ---
 
-## 12 · Need more detail?
+## 12 · Production cloud-server deployment
+
+When deploying to a cloud server where the **client's Artemis is already
+running** (not on this host), use start.sh's prod mode. Same script, same
+flow — just env vars + one extra `source` step.
+
+### 12.1 · Create a private env file (one-time per server)
+
+On the cloud server (NOT in the repo, NEVER committed):
+
+```bash
+cp .env.example /home/ops/.env.prod
+chmod 600 /home/ops/.env.prod
+nano /home/ops/.env.prod
+```
+
+Fill in **at minimum**:
+```bash
+SKIP_ARTEMIS=1
+ARTEMIS_BROKER_URL=tcp://<client-artemis-host>:61616
+ARTEMIS_USER=<client-given-username>
+ARTEMIS_PASSWORD=<client-given-password>
+SCADA_AES_KEY=$(openssl rand -base64 32)   # one-time, write down
+RABBITMQ_USER=<your-rabbitmq-user>
+RABBITMQ_PASS=<your-rabbitmq-password>
+MQTT_USER=<your-mqtt-user>
+MQTT_PASS=<your-mqtt-password>
+```
+
+> The AES key MUST be the same one the client decrypts with on their side.
+> Generate once, share securely with the SCADA-API operator, store offline.
+
+### 12.2 · Deploy
+
+```bash
+source /home/ops/.env.prod
+./start.sh
+```
+
+start.sh auto-detects prod mode (because `SKIP_ARTEMIS=1` or `ARTEMIS_BROKER_URL`
+is non-default) and:
+- skips `docker compose up artemis` on the host
+- patches `bridge-config` ConfigMap with the parsed `ARTEMIS_HOST`/`ARTEMIS_PORT`
+- regenerates `bridge-secret`, `connect-secret`, `scada-api-secret` from your env vars
+- substitutes the broker URL into the Connect connector configmap (5 places)
+- skips local viewer-queue creation (no local Artemis container to `docker exec` into)
+
+### 12.3 · Verify reachability before deploying
+
+If `nc` is available in your namespace, test that the cluster can see the
+client's Artemis BEFORE running start.sh:
+
+```bash
+kubectl -n pinkline run -i --rm tcptest --image=busybox --restart=Never -- \
+  sh -c "nc -vz <client-artemis-host> 61616"
+# expect: connected
+```
+
+If this fails, no amount of credential fiddling will help — fix the network
+(firewall, DNS, VPN) first.
+
+### 12.4 · Security checklist for prod
+
+- [ ] `chmod 600 /home/ops/.env.prod` so only ops can read it
+- [ ] `.env.prod` confirmed in `.gitignore` (it is)
+- [ ] Real `SCADA_AES_KEY` rotated from the dev default (`k7Qh2Nf...`)
+- [ ] Real Artemis password from the client, NOT `testpass123`
+- [ ] Cloud server has a non-default minikube hostname (avoid `localhost`)
+- [ ] Audit `kubectl get secret bridge-secret -o yaml` to confirm no dev creds linger
+
+For more rigorous deployments later, replace the `.env.prod` file with a
+secret manager (HashiCorp Vault, AWS Secrets Manager via External Secrets
+Operator, or Sealed Secrets). The start.sh interface stays the same — only
+the source of env vars changes.
+
+---
+
+## 13 · Need more detail?
 
 - **Daily restart after PC reboot**: see [`MORNING-START.md`](./MORNING-START.md)
 - **Step-by-step manual bring-up** (no `start.sh`, do it yourself with status checks at every step): see [`MANUAL-RUN.md`](./MANUAL-RUN.md)

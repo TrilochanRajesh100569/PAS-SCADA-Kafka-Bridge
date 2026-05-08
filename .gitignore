@@ -22,7 +22,15 @@ Thumbs.db
 __pycache__/
 *.pyc
 *.pyo
+
+# Local environment files — NEVER commit real secrets
 .env
+.env.local
+.env.prod
+.env.dev
+.env.staging
+.env.*.local
+*.env
 
 # Logs
 *.log
