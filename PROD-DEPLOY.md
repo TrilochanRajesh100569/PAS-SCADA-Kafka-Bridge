@@ -9,6 +9,87 @@ Artemis running. Same `start.sh`, different env vars.
 
 ---
 
+## ⚡ Quick start — deploy in 6 steps
+
+Skip ahead to detailed sections below for verification, troubleshooting,
+and rotation. This is the minimum to get running.
+
+### Step 1 — Install prerequisites on the cloud server (one time)
+
+```
+docker · minikube (or k8s) · kubectl · bash · git · jq
+```
+
+### Step 2 — Clone the repo
+
+```bash
+git clone <repo-url> /opt/PAS-SCADA-Kafka-Bridge
+cd /opt/PAS-SCADA-Kafka-Bridge
+```
+
+### Step 3 — Verify the cluster can reach the client's Artemis
+
+```bash
+# Replace with the client-given Artemis host + port
+kubectl run -i --rm tcptest --image=busybox --restart=Never -- \
+  sh -c "nc -vz <client-artemis-host> 61616"
+# Expected: ... open
+```
+
+If this fails, fix network/firewall/VPN BEFORE going further.
+
+### Step 4 — Create your env file (one time)
+
+```bash
+cp .env.template /home/ops/.env.prod
+chmod 600 /home/ops/.env.prod
+nano /home/ops/.env.prod
+```
+
+In the editor, set at minimum:
+```bash
+SKIP_ARTEMIS=1
+ARTEMIS_BROKER_URL=tcp://<client-artemis-host>:61616
+ARTEMIS_USER=<client-given-username>
+ARTEMIS_PASSWORD=<client-given-password>
+SCADA_AES_KEY=<run: openssl rand -base64 32>
+RABBITMQ_USER=<your-rmq-user>
+RABBITMQ_PASS=<your-rmq-password>
+MQTT_USER=<your-mqtt-user>
+MQTT_PASS=<your-mqtt-password>
+```
+
+### Step 5 — Source and deploy
+
+```bash
+source /home/ops/.env.prod
+./start.sh
+```
+
+Wait ~10–15 min on first run, ~2 min on subsequent runs.
+
+### Step 6 — Verify
+
+```bash
+kubectl -n pinkline exec deploy/kafka-connect -- \
+  curl -s http://localhost:8083/connectors?expand=status \
+  | jq 'to_entries[] | {name:.key, state:.value.status.connector.state}'
+```
+
+Expected: 7 connectors, all `RUNNING`. If any `FAILED` → see [Section 7](#7--common-prod-issues).
+
+### Subsequent deploys (after first time)
+
+Just steps 5 + 6:
+```bash
+source /home/ops/.env.prod
+./start.sh
+```
+
+`start.sh` is idempotent. Re-run anytime to apply config changes.
+
+---
+
 ## 1 · What changes vs dev
 
 | Concern | Dev (your PC) | Prod (cloud server) |
