@@ -66,14 +66,14 @@ START_PF="${START_PF:-1}"
 SKIP_ARTEMIS="${SKIP_ARTEMIS:-0}"
 
 # Accept either ARTEMIS_BROKER_URL (combined) OR ARTEMIS_HOST+ARTEMIS_PORT
-# (split). The split form matches .env.example and Spring Boot conventions.
+# (split). The split form matches .env.template and Spring Boot conventions.
 if [ -n "${ARTEMIS_HOST:-}" ] && [ -n "${ARTEMIS_PORT:-}" ]; then
   ARTEMIS_BROKER_URL="${ARTEMIS_BROKER_URL:-tcp://${ARTEMIS_HOST}:${ARTEMIS_PORT}}"
 fi
 ARTEMIS_BROKER_URL="${ARTEMIS_BROKER_URL:-tcp://host.minikube.internal:61616}"
 
 ARTEMIS_USER="${ARTEMIS_USER:-pasbridge}"
-# Accept either ARTEMIS_PASSWORD or ARTEMIS_PASS (matches .env.example).
+# Accept either ARTEMIS_PASSWORD or ARTEMIS_PASS (matches .env.template).
 ARTEMIS_PASSWORD="${ARTEMIS_PASSWORD:-${ARTEMIS_PASS:-testpass123}}"
 
 RABBITMQ_USER="${RABBITMQ_USER:-thiru}"

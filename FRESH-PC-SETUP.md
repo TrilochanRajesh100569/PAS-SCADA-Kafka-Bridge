@@ -387,7 +387,7 @@ flow — just env vars + one extra `source` step.
 On the cloud server (NOT in the repo, NEVER committed):
 
 ```bash
-cp .env.example /home/ops/.env.prod
+cp .env.template /home/ops/.env.prod
 chmod 600 /home/ops/.env.prod
 nano /home/ops/.env.prod
 ```

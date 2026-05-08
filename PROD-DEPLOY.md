@@ -49,7 +49,7 @@ Copy the template, restrict permissions, fill in real values:
 
 ```bash
 cd /path/to/PAS-SCADA-Kafka-Bridge
-cp .env.example /home/ops/.env.prod
+cp .env.template /home/ops/.env.prod
 chmod 600 /home/ops/.env.prod
 nano /home/ops/.env.prod
 ```
@@ -78,7 +78,7 @@ MQTT_USER=<your-mqtt-user>
 MQTT_PASS=<your-mqtt-password>
 ```
 
-> The full `.env.example` shows every key with dev defaults pre-filled.
+> The full `.env.template` shows every key with dev defaults pre-filled.
 > You only need to override what's actually different.
 
 ### `.gitignore` already protects this
@@ -269,7 +269,7 @@ muscle memory.
 
 ```bash
 # First time on this cloud server
-cp .env.example /home/ops/.env.prod
+cp .env.template /home/ops/.env.prod
 chmod 600 /home/ops/.env.prod
 nano /home/ops/.env.prod          # fill in real values
 
