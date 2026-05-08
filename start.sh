@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
 # start.sh — bring up the client-requested deployment end-to-end.
 #
-#   - Artemis: Docker (from D:/pinkline/code/messaging-infra)
+#   - Artemis: Docker on host (from $MESSAGING_INFRA, default /d/pinkline/messaging-infra)
 #   - Everything else (Zookeeper, Kafka, Kafdrop, Kafka Connect, bridge,
-#     RabbitMQ, SCADA API): minikube
+#     RabbitMQ, SCADA API, monitor, demo): minikube
 #
 # Idempotent: re-running after a crash or partial failure converges to the
 # desired state. Safe to invoke repeatedly.
 #
 # Prerequisites: docker, minikube, kubectl on PATH.
+#
+# Companion docs:
+#   FRESH-PC-SETUP.md  — first-time bring-up walkthrough
+#   MORNING-START.md   — daily restart routine after PC reboot
+#   WORKFLOW.md        — what each component does and how data flows
+#   MANUAL-RUN.md      — step-by-step alternative to this script
 
 set -euo pipefail
 

@@ -1,7 +1,7 @@
 # Fresh PC Setup — PAS-SCADA-Kafka-Bridge
 
-Run-from-scratch guide for a Windows PC where someone has been handed both
-project folders and just wants to get the system running.
+Single source of truth for handing this project off to another Windows PC.
+Covers first-time bring-up, daily restart, and troubleshooting.
 
 ---
 
@@ -12,24 +12,38 @@ You should have received **two folders**. Place them side-by-side under
 
 ```
 D:\pinkline\
-  ├── messaging-infra\           ← Artemis docker-compose
+  ├── messaging-infra\           ← Artemis docker-compose (separate repo)
   └── PAS-SCADA-Kafka-Bridge\    ← this repo (everything else)
 ```
 
-> If your folders are at a different path, adjust the `MESSAGING_INFRA`
-> variable in step 3 accordingly.
+> If your folders are at a different path, adjust `MESSAGING_INFRA` in
+> Step 3 accordingly.
+
+> **Important:** Artemis runs as a **Docker container on the host** (not
+> inside Kubernetes). It will **not** appear in `kubectl get pods -n pinkline`.
+> Verify it with `docker ps --filter name=artemis` instead.
 
 ---
 
 ## 1 · Prerequisites (must be installed first)
 
-| Tool | Why | Check it works |
+| Tool | Why | Verify |
 |---|---|---|
 | Docker Desktop | Runs Artemis + builds all images | `docker ps` |
 | minikube | Local Kubernetes cluster | `minikube version` |
 | kubectl | Talks to minikube | `kubectl version --client` |
 | Git for Windows (Git Bash) | Runs `start.sh` (bash script) | `bash --version` |
-| Java 17 + Maven | Builds the bridge | `mvn -v` (only needed if rebuilding bridge from source) |
+| jq | Used by some troubleshooting commands | `jq --version` (`winget install jqlang.jq`) |
+| Java 17 + Maven | Only if rebuilding bridge from source | `mvn -v` |
+
+Docker Desktop resources (Settings → Resources):
+
+- **CPU** ≥ 4
+- **Memory** ≥ 8 GB
+- **Disk** ≥ 30 GB free
+
+Without these, the Spring Boot bridge will OOM-kill, Kafka will fail
+leader election, and minikube image loads will run out of space.
 
 **Before continuing:** make sure **Docker Desktop is running** (whale icon
 in system tray, not greyed out).
@@ -43,6 +57,10 @@ cd /d/pinkline/PAS-SCADA-Kafka-Bridge
 ```
 
 (In Git Bash, Windows drives are `/c`, `/d`, etc. Use forward slashes.)
+
+> **Use Git Bash, not WSL bash.** `C:\Windows\System32\bash.exe` is the
+> WSL launcher and can't see `/d/pinkline/...` from your host disk. Open
+> Git Bash explicitly: `C:\Program Files\Git\bin\bash.exe`.
 
 ---
 
@@ -60,7 +78,7 @@ terminal requires re-running this `export`.
 
 ---
 
-## 4 · Run start.sh
+## 4 · Run start.sh (first time)
 
 ```bash
 ./start.sh
@@ -94,20 +112,20 @@ idempotent and converges to the right state.
 
 ## 5 · Verify everything is up
 
-Open these URLs in Chrome — **all should respond with content (not "site
-can't be reached")**:
+Open these URLs in Chrome — **all should respond with content**:
 
-| URL | What you should see |
-|---|---|
-| http://localhost:8080 | Monitor dashboard — 19 components, mostly green |
-| http://localhost:8091 | SCADA simulator (TMS ↔ SCADA dashboard) |
-| http://localhost:8090 | Demo data table |
-| http://localhost:8090/flow | Live flow diagram with animated arrows |
-| http://localhost:8085/actuator/health | `{"status":"UP"}` from the bridge |
-| http://localhost:8085/api/messages | JSON array of recent messages |
-| http://localhost:9000 | Kafdrop — list of Kafka topics |
-| http://localhost:8161/console | Artemis console (login: `admin` / `admin`) |
-| http://localhost:15672 | RabbitMQ admin (login: `thiru` / `password`) |
+| URL | What you should see | Login |
+|---|---|---|
+| http://localhost:8080 | Monitor dashboard — 19 components, mostly green | — |
+| http://localhost:8091 | SCADA simulator (TMS ↔ SCADA dashboard) | — |
+| http://localhost:8090 | Demo data table | — |
+| http://localhost:8090/flow | Live flow diagram with animated arrows | — |
+| http://localhost:8085/actuator/health | `{"status":"UP"}` from the bridge | — |
+| http://localhost:8085/api/messages | JSON array of recent messages | — |
+| http://localhost:9000 | Kafdrop — list of Kafka topics | — |
+| http://localhost:8161/console | Artemis console | admin / admin |
+| http://localhost:15672 | RabbitMQ admin | thiru / password |
+| http://localhost:8083/connectors?expand=status | Kafka Connect REST — all 7 connectors RUNNING | — |
 
 If the Monitor at 8080 shows everything green after ~3 minutes, the
 system is healthy end-to-end.
@@ -138,7 +156,26 @@ Open http://localhost:9000 → click any topic (`tms.raw`,
 
 ---
 
-## 7 · Stopping / cleanup
+## 7 · Daily restart (next-day run)
+
+This document covers **first-time setup only**. After you've successfully
+run `start.sh` once, the daily PC-reboot routine is much shorter and lives
+in its own file:
+
+> **See [MORNING-START.md](./MORNING-START.md)** for the daily startup steps.
+
+You don't re-run `start.sh` every day — minikube + Docker survive PC
+shutdown, so the morning routine is just: start Docker Desktop → start
+minikube → wait for pods → start port-forwards.
+
+---
+
+## 8 · Stopping / cleanup
+
+### Stop port-forwards (end of day)
+```powershell
+Get-Process powershell | Where-Object { $_.MainWindowTitle -like '*kubectl*' } | Stop-Process
+```
 
 ### Stop one service (preserves state)
 ```bash
@@ -160,48 +197,150 @@ Re-running `start.sh` after a `minikube delete` rebuilds everything from scratch
 
 ---
 
-## 8 · Common gotchas
+## 9 · Common gotchas
+
+### Dashboard at 8091/8080/8090 shows old UI even after rebuilding
+A leftover host docker container (`pas-scada-api`, `pas-scada-monitor`,
+`pas-scada-demo`, or `external-scada-scada-api`) is bound to the same
+port and shadowing the kubectl port-forward — so your browser hits the
+old container, not the freshly-deployed pod. `start.sh` Section 0 already
+handles this, but if you spun up something manually with `docker run`:
+
+```powershell
+docker ps | findstr /i "pas-scada external-scada"
+docker rm -f pas-scada-api pas-scada-monitor pas-scada-demo external-scada-scada-api
+```
+
+Then re-run the relevant port-forward from Step 7.5.
+
+> **Canary check:** the SCADA dashboard prints `[BUILD-MARKER-A1]` near
+> the title (see `external-scada/scada-api/static/dashboard.html:363`).
+> If the marker doesn't match what's in your source, the running container
+> is stale.
 
 ### "Site can't be reached" on a dashboard
-A port-forward died. Re-run:
+A port-forward died. Re-run Step 7.5 (or the single failing line from it).
+
+### Pod stuck `0/1 Running` for 5+ min
 ```bash
-./start.sh
+kubectl -n pinkline rollout restart deploy/<name>
 ```
 
-### Dashboard shows old UI even after rebuilding
-A leftover host docker container (`pas-scada-api` etc.) is shadowing
-the kubectl port-forward. `start.sh`'s Section 0 already handles this,
-but if you spin up something manually with `docker run`, kill it:
+### Bridge in `CrashLoopBackOff`
+Bridge needs RabbitMQ. Check rabbitmq pod is `1/1 Running` first
+(`kubectl get pods -n scada`). Then restart bridge.
+
+### Artemis container missing
+```powershell
+& 'C:\Program Files\Docker\Docker\resources\bin\docker.exe' start artemis
+```
+If the container doesn't exist at all (`docker ps -a --filter name=artemis`
+shows nothing), `messaging-infra` was never brought up. From Git Bash:
 ```bash
-docker rm -f pas-scada-api pas-scada-monitor pas-scada-demo
+export MESSAGING_INFRA="/d/pinkline/messaging-infra"
+docker compose -f $MESSAGING_INFRA/docker-compose.yml up -d
 ```
 
-### Kafka in CrashLoopBackOff with "InconsistentClusterIdException"
+### Artemis container shows "unhealthy"
+Cosmetic — the broker is fine. Verify with `curl -s http://localhost:8161/console`.
+
+### Kafka pod in `Error` with `InconsistentClusterIdException`
 Stale Kafka data in minikube hostpath. Wipe it:
 ```bash
 kubectl -n pinkline scale deploy kafka --replicas=0
 minikube ssh -- "sudo rm -rf /tmp/hostpath-provisioner/pinkline/kafka-data/*"
 kubectl -n pinkline scale deploy kafka --replicas=1
 ```
-Then re-run `start.sh` to redo the topic bootstrap.
+With the PVC fix in `tms/k8s/20-zookeeper.yaml` this should not recur.
 
 ### Bridge probe failing (Spring Boot slow startup)
 The bridge needs ~3 minutes to come up on a cold start. If it's stuck
-in `0/1 Running` after 5 minutes, check logs:
+in `0/1 Running` after 5 minutes:
 ```bash
 kubectl -n pinkline logs deploy/pas-scada-bridge --tail 50
 ```
 
-### Artemis container shows "unhealthy"
-Cosmetic — the broker is fine. Verify with:
-```bash
-curl -s http://localhost:8161/console
+### Port-forward log shows "connection refused"
+The pod restarted while the forward was open. Close that minimized window
+and re-run that single line from Step 7.5.
+
+### Everything is broken — nuke and restart
+```powershell
+& $env:USERPROFILE\minikube.exe stop
+& $env:USERPROFILE\minikube.exe start
+./start.sh   # from Git Bash
 ```
-Should return HTML.
 
 ---
 
-## 9 · What's where (folder map)
+## 10 · Troubleshooting reference
+
+### Show everything's state at once
+```bash
+kubectl -n pinkline get pods
+kubectl -n scada get pods
+docker ps --filter name=artemis
+curl -s localhost:8083/connectors?expand=status \
+  | jq 'to_entries[] | {name:.key, state:.value.status.connector.state}'
+curl -s localhost:8085/actuator/health
+curl -s localhost:8091/api/status
+```
+
+### Restart one piece after a code change
+
+```bash
+# After Java change → bridge
+docker build -t pinkline/pas-scada-bridge:latest tms/
+minikube ssh -- "docker rmi -f pinkline/pas-scada-bridge:latest"
+minikube image load pinkline/pas-scada-bridge:latest
+kubectl -n pinkline rollout restart deploy/pas-scada-bridge
+
+# After scada-api/app.py or dashboard.html change
+docker build -t ghcr.io/thirunavukkarasuthangaraj/pas-scada-api:latest external-scada/scada-api/
+minikube ssh -- "docker rmi -f ghcr.io/thirunavukkarasuthangaraj/pas-scada-api:latest"
+minikube image load ghcr.io/thirunavukkarasuthangaraj/pas-scada-api:latest
+kubectl -n scada rollout restart deploy/scada-api
+
+# After monitor.py change
+docker build -t pinkline/pas-scada-monitor:latest monitor/
+minikube ssh -- "docker rmi -f pinkline/pas-scada-monitor:latest"
+minikube image load pinkline/pas-scada-monitor:latest
+kubectl -n pinkline rollout restart deploy/pas-scada-monitor
+
+# After demo template change
+docker build -t pinkline/pas-scada-demo:1.0.0 demo/
+minikube ssh -- "docker rmi -f pinkline/pas-scada-demo:1.0.0"
+minikube image load pinkline/pas-scada-demo:1.0.0
+kubectl -n pinkline rollout restart deploy/pas-scada-demo
+
+# After Connect connector config change (no rebuild needed)
+kubectl apply -f connect/k8s/20-configmap.yaml
+kubectl -n pinkline delete job register-connectors --ignore-not-found
+kubectl apply -f connect/k8s/40-job-register.yaml
+```
+
+### Pod logs (most common starting point)
+```bash
+kubectl -n pinkline logs -f deploy/pas-scada-bridge
+kubectl -n pinkline logs -f deploy/kafka-connect
+kubectl -n pinkline logs -f deploy/pas-scada-monitor
+kubectl -n scada    logs -f deploy/scada-api
+```
+
+### Forward + reverse path test
+```bash
+# Forward: publish a test XML to Artemis TMS.PISInfo
+kubectl apply -f test-publish.yaml
+# Watch http://localhost:8091 → "TMS → SCADA" panel — JSON appears in ~3s
+
+# Reverse: SCADA auto-publishes UpdateAlarm every 10s.
+# Browse Artemis console → addresses → SCADA.TMS.Alarms → queues → Browse
+# Message count grows continuously.
+```
+
+---
+
+## 11 · Folder map
 
 | Folder | Purpose |
 |---|---|
@@ -219,14 +358,16 @@ HTTP REST), so any subset can run independently.
 
 ---
 
-## 10 · Need more detail on a specific component?
+## 12 · Need more detail?
 
-- **Per-service start commands** (run just one piece without the full
-  `start.sh`): see `START-COMMANDS.md`
-- **Architecture / why each piece exists**: see `README.md`
-- **Bridge internals (Camel routes, encryption)**: see `tms/README.md`
-- **Connector configs**: see `connect/README.md`
-- **Demo UI**: see `demo/README.md`
+- **Daily restart after PC reboot**: see [`MORNING-START.md`](./MORNING-START.md)
+- **Step-by-step manual bring-up** (no `start.sh`, do it yourself with status checks at every step): see [`MANUAL-RUN.md`](./MANUAL-RUN.md)
+- **Per-service start / restart commands** (bring up just one piece): see [`START-COMMANDS.md`](./START-COMMANDS.md)
+- **Architecture / why each piece exists**: see [`README.md`](./README.md) and [`CLIENT-REQUEST.md`](./CLIENT-REQUEST.md)
+- **Bridge internals (Camel routes, encryption)**: see [`tms/README.md`](./tms/README.md)
+- **Connector configs**: see [`connect/README.md`](./connect/README.md)
+- **VM / production deployment** (different topic, not for fresh PC dev):
+  see `VM-DEPLOY.md`, `TMS-LINUX-VM.md`, `MONITOR-VM.md`, `SCADA-WINDOWS-VM.md`
 
 ---
 

@@ -4,7 +4,7 @@ Each section is self-contained. Run from the repo root unless noted.
 Use this when you want to bring up / restart just one piece without
 running the whole `start.sh`.
 
-> **First time on a new PC?** Read [SETUP.md](./SETUP.md) first — it covers
+> **First time on a new PC?** Read [FRESH-PC-SETUP.md](./FRESH-PC-SETUP.md) first — it covers
 > installing Docker / minikube / kubectl / git and cloning both repos.
 > Once the prerequisites are in place, come back here.
 

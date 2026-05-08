@@ -12,6 +12,8 @@
 #   --all        --pods + --artemis + --minikube
 #   --wipe       full teardown — deletes namespaces, stops Artemis,
 #                runs `minikube delete`. DESTRUCTIVE.
+#
+# See FRESH-PC-SETUP.md Section 8 for the recommended stopping flow.
 
 set -euo pipefail
 

@@ -1,6 +1,10 @@
 # Morning start — bring the system back up after shutdown
 
-Open this file tomorrow, copy-paste each block in order.
+Daily startup routine. Open this file every morning, copy-paste each block in order.
+
+> **First time on this PC?** Run [FRESH-PC-SETUP.md](./FRESH-PC-SETUP.md)
+> instead — that does the full bring-up via `start.sh`. This file is for
+> day-2-onwards, when minikube + Docker images already exist.
 
 ---
 
@@ -30,7 +34,28 @@ Done! kubectl is now configured to use "minikube" cluster
 
 ---
 
-## Step 3 · Wait for pods (~2 minutes)
+## Step 3 · Make sure Artemis is up
+
+Artemis runs as a host Docker container (not a k8s pod), so it needs a
+separate check:
+
+```powershell
+docker ps --filter name=artemis
+```
+
+Expected: one row with `STATUS = Up`. If it's missing or stopped:
+
+```powershell
+& 'C:\Program Files\Docker\Docker\resources\bin\docker.exe' start artemis
+```
+
+If the container doesn't exist at all (`docker ps -a --filter name=artemis`
+returns nothing), `messaging-infra` was never brought up on this PC — go
+back to [FRESH-PC-SETUP.md](./FRESH-PC-SETUP.md) Step 4.
+
+---
+
+## Step 4 · Wait for pods (~2 minutes)
 
 Run this and confirm all pods say `1/1 Running`:
 
@@ -46,10 +71,9 @@ Re-run until everything shows `1/1 Running`.
 
 ---
 
-## Step 4 · Start port-forwards (so browser works)
+## Step 5 · Start port-forwards (so browser works)
 
 Copy this **whole block** into PowerShell and press Enter:
-
 
 ```powershell
 $svcs = @(
@@ -67,12 +91,12 @@ foreach ($s in $svcs) {
 }
 ```
 
-7 minimized PowerShell windows will appear in your taskbar. **Don't
+8 minimized PowerShell windows will appear in your taskbar. **Don't
 close them** — each one holds a port-forward.
 
 ---
 
-## Step 5 · Open in browser
+## Step 6 · Open in browser
 
 | URL | What |
 |---|---|
@@ -88,7 +112,7 @@ should be green.
 
 ---
 
-## When you're done for the day — shutdown
+## When you're done for the day
 
 Stop the port-forwards:
 
@@ -108,11 +132,38 @@ morning when you re-run Step 2.
 |---|---|
 | Some pod stuck `0/1 Running` for 5+ min | `kubectl -n pinkline rollout restart deploy/<name>` |
 | Bridge in `CrashLoopBackOff` | Bridge needs RabbitMQ. Check rabbitmq pod is `1/1 Running` first. Then restart bridge. |
-| Browser says "site can't be reached" on localhost:8080 | Port-forwards died. Re-run Step 4. |
-| Port-forward log shows "connection refused" | The pod restarted while the forward was open. Close that minimized window and re-run that line from Step 4. |
+| Browser says "site can't be reached" on localhost:8080 etc. | Port-forwards died. Re-run Step 5. |
+| Port-forward log shows "connection refused" | The pod restarted while the forward was open. Close that minimized window and re-run that single line from Step 5. |
 | Artemis container missing | `& 'C:\Program Files\Docker\Docker\resources\bin\docker.exe' start artemis` |
+| **Dashboard shows old UI / wrong build marker** | Leftover host docker container shadowing the port-forward. See section below. |
 | Kafka pod in `Error` with `InconsistentClusterIdException` | See **Kafka cluster ID mismatch** below. |
 | Everything is wrong, nuke and restart | `& $env:USERPROFILE\minikube.exe stop` then start again |
+
+---
+
+## Old UI on a dashboard (8080 / 8090 / 8091)
+
+If a dashboard shows the wrong layout or stale data even after a fresh
+build, a host Docker container is bound to that port and shadowing the
+kubectl port-forward — your browser hits the old container instead of
+the freshly-deployed pod.
+
+Check:
+```powershell
+docker ps | findstr /i "pas-scada external-scada"
+```
+
+Kill any matches:
+```powershell
+docker rm -f pas-scada-api pas-scada-monitor pas-scada-demo external-scada-scada-api
+```
+
+Then re-run the relevant port-forward line from Step 5.
+
+**Canary check:** the SCADA dashboard at http://localhost:8091 prints a
+build marker like `[BUILD-MARKER-A1]` near the title. Compare against
+`external-scada/scada-api/static/dashboard.html:363` — if they don't
+match, the running container is stale.
 
 ---
 
@@ -139,5 +190,3 @@ kubectl apply -f connect/k8s/40-job-register.yaml
 
 Topic data is wiped, but topics auto-recreate and the bridge republishes
 fresh data from RabbitMQ. Safe for dev.
-
-For deeper issues, see `MANUAL-RUN.md` "If it fails" tables.
