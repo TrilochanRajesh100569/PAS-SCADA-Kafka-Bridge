@@ -1,0 +1,38 @@
+# Force LF line endings on shell scripts and YAML so they work in Git Bash
+# on Windows. Without this, core.autocrlf=true converts LF→CRLF on checkout
+# and bash chokes with "bad interpreter" or "command not found: ..." on every
+# line because the trailing \r is treated as part of the command.
+#
+# Auto-detect text files
+* text=auto
+
+# Shell scripts MUST be LF
+*.sh    text eol=lf
+*.bash  text eol=lf
+
+# YAML for k8s manifests + docker-compose — kubectl & docker compose accept
+# either, but mixed line endings make diffs noisy. Pin to LF.
+*.yaml  text eol=lf
+*.yml   text eol=lf
+
+# Properties / config files where mixed endings cause subtle bugs
+*.properties text eol=lf
+Dockerfile   text eol=lf
+
+# Windows batch / PowerShell stay CRLF (native to Windows)
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# Markdown — let either work; readers handle both
+*.md    text
+
+# Binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.jar   binary
+*.zip   binary
+*.gz    binary

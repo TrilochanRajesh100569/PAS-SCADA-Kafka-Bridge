@@ -29,6 +29,55 @@ MESSAGING_INFRA="${MESSAGING_INFRA:-/d/pinkline/messaging-infra}"
 # already have your own port-forwards running, or you only want the cluster up).
 START_PF="${START_PF:-1}"
 
+# ════════════════════════════════════════════════════════════════════════
+# PROD / CLOUD-SERVER MODE
+# ════════════════════════════════════════════════════════════════════════
+# Same script handles dev (local minikube + host Artemis) AND prod (cloud
+# server + client's existing Artemis). For prod, set these env vars before
+# invoking start.sh:
+#
+#   SKIP_ARTEMIS=1                           — skip docker compose Artemis
+#   ARTEMIS_BROKER_URL=tcp://10.0.0.5:61616  — client's Artemis address
+#   ARTEMIS_USER=<client-given-username>     — client's JMS username
+#   ARTEMIS_PASSWORD=<client-given-password> — client's JMS password
+#
+# Optional overrides (default to dev values when unset):
+#   RABBITMQ_USER, RABBITMQ_PASS, MQTT_USER, MQTT_PASS
+#   SCADA_AES_KEY  (must match between bridge-secret and scada-api-secret)
+#
+# What changes in prod mode:
+#   - Section 2  (docker compose Artemis on this host) is SKIPPED
+#   - Section 6  (bridge-secret) is generated dynamically from env vars
+#   - Section 11 (connect-configmap) has broker URL substituted via sed
+#   - Section 11 (connect-secret) is generated dynamically from env vars
+#   - Section 11c (viewer queues via docker exec) is SKIPPED
+#
+# Example dev run (no env vars needed):
+#   ./start.sh
+#
+# Example prod run:
+#   export SKIP_ARTEMIS=1
+#   export ARTEMIS_BROKER_URL=tcp://artemis.client.example:61616
+#   export ARTEMIS_USER=pasbridge
+#   export ARTEMIS_PASSWORD=<real-password>
+#   ./start.sh
+# ════════════════════════════════════════════════════════════════════════
+SKIP_ARTEMIS="${SKIP_ARTEMIS:-0}"
+ARTEMIS_BROKER_URL="${ARTEMIS_BROKER_URL:-tcp://host.minikube.internal:61616}"
+ARTEMIS_USER="${ARTEMIS_USER:-pasbridge}"
+ARTEMIS_PASSWORD="${ARTEMIS_PASSWORD:-testpass123}"
+RABBITMQ_USER="${RABBITMQ_USER:-thiru}"
+RABBITMQ_PASS="${RABBITMQ_PASS:-password}"
+MQTT_USER="${MQTT_USER:-thiru}"
+MQTT_PASS="${MQTT_PASS:-password}"
+SCADA_AES_KEY="${SCADA_AES_KEY:-k7Qh2NfT8vR0mC9aXy4pLwZbE3sG6uJtH1iKd5oArMw=}"
+
+if [ "$SKIP_ARTEMIS" = "1" ] || [ "$ARTEMIS_BROKER_URL" != "tcp://host.minikube.internal:61616" ]; then
+  IS_PROD=1
+else
+  IS_PROD=0
+fi
+
 log()  { printf '\n\033[1;36m▶ %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m  ✓ %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m  ! %s\033[0m\n' "$*"; }
@@ -71,11 +120,17 @@ else
 fi
 
 # ── 2. Artemis (Docker on host) ─────────────────────────────────────────
-log "Starting Artemis from $MESSAGING_INFRA"
-[ -f "$MESSAGING_INFRA/docker-compose.yml" ] \
-  || die "$MESSAGING_INFRA/docker-compose.yml not found — set MESSAGING_INFRA env var if path differs"
-docker compose -f "$MESSAGING_INFRA/docker-compose.yml" up -d
-ok "Artemis up (port 61616 / console 8161)"
+if [ "$SKIP_ARTEMIS" = "1" ]; then
+  warn "SKIP_ARTEMIS=1 — assuming client Artemis is already running on a remote host."
+  warn "Make sure connect/k8s/20-configmap.yaml broker URLs and"
+  warn "connect-secret/bridge-secret credentials point at it BEFORE this script applies them."
+else
+  log "Starting Artemis from $MESSAGING_INFRA"
+  [ -f "$MESSAGING_INFRA/docker-compose.yml" ] \
+    || die "$MESSAGING_INFRA/docker-compose.yml not found — set MESSAGING_INFRA env var if path differs (or SKIP_ARTEMIS=1 for prod)"
+  docker compose -f "$MESSAGING_INFRA/docker-compose.yml" up -d
+  ok "Artemis up (port 61616 / console 8161)"
+fi
 
 # ── 3. Build Connect image if not present ───────────────────────────────
 log "Connect image"
@@ -155,17 +210,40 @@ kubectl apply -f "$SCRIPT_DIR/tms/k8s/20-zookeeper.yaml"
 kubectl apply -f "$SCRIPT_DIR/tms/k8s/30-kafka.yaml"
 kubectl apply -f "$SCRIPT_DIR/tms/k8s/40-kafdrop.yaml"
 kubectl apply -f "$SCRIPT_DIR/tms/k8s/overlay-minikube.yaml"
+
+# Generate bridge-secret from env vars (works for both dev and prod —
+# defaults match the dev yaml when env vars unset; in prod, env vars
+# carry the client's real Artemis user/password).
+kubectl -n pinkline create secret generic bridge-secret \
+  --from-literal=ARTEMIS_USER="$ARTEMIS_USER" \
+  --from-literal=ARTEMIS_PASS="$ARTEMIS_PASSWORD" \
+  --from-literal=RABBITMQ_USER="$RABBITMQ_USER" \
+  --from-literal=RABBITMQ_PASS="$RABBITMQ_PASS" \
+  --from-literal=MQTT_USER="$MQTT_USER" \
+  --from-literal=MQTT_PASS="$MQTT_PASS" \
+  --from-literal=SCADA_AES_KEY="$SCADA_AES_KEY" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
 kubectl apply -f "$SCRIPT_DIR/tms/k8s/deployment.yaml"
-ok "tms manifests applied"
+ok "tms manifests applied (bridge-secret from env vars)"
 
 # ── 7. Apply external-scada/k8s manifests ───────────────────────────────
 log "Applying external-scada/k8s manifests"
 for f in 00-namespace.yaml 10-rabbitmq-configmap.yaml 20-rabbitmq-secret.yaml \
          30-rabbitmq-pvc.yaml 40-rabbitmq-deployment.yaml 50-rabbitmq-service.yaml \
-         60-scada-api-secret.yaml 70-scada-api-deployment.yaml; do
+         70-scada-api-deployment.yaml; do
   kubectl apply -f "$SCRIPT_DIR/external-scada/k8s/$f"
 done
-ok "scada manifests applied"
+
+# Generate scada-api-secret from env vars so SCADA_AES_KEY stays in sync
+# with bridge-secret (otherwise decryption silently fails).
+kubectl -n scada create secret generic scada-api-secret \
+  --from-literal=SCADA_AES_KEY="$SCADA_AES_KEY" \
+  --from-literal=MQTT_USER="$MQTT_USER" \
+  --from-literal=MQTT_PASS="$MQTT_PASS" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+ok "scada manifests applied (scada-api-secret from env vars)"
 
 # ── 8. Patch imagePullPolicy on locally-built deployments ───────────────
 # imagePullPolicy=IfNotPresent → use the image we just `minikube image load`-ed
@@ -222,14 +300,14 @@ log "Declaring scada.tms.alarms.queue + binding"
 #     block the spawned PowerShell process with EPERM uv_spawn).
 # Both commands are idempotent (rabbitmqadmin returns 0 on "already exists").
 kubectl -n scada exec deploy/rabbitmq -- \
-  rabbitmqadmin --username=thiru --password=password \
+  rabbitmqadmin --username="$RABBITMQ_USER" --password="$RABBITMQ_PASS" \
     declare queue name=scada.tms.alarms.queue durable=true auto_delete=false \
   >/dev/null 2>&1 \
   && ok "queue declared (or already existed)" \
   || warn "queue declare failed — verify with: kubectl -n scada exec deploy/rabbitmq -- rabbitmqctl list_queues"
 
 kubectl -n scada exec deploy/rabbitmq -- \
-  rabbitmqadmin --username=thiru --password=password \
+  rabbitmqadmin --username="$RABBITMQ_USER" --password="$RABBITMQ_PASS" \
     declare binding source=amq.topic destination=scada.tms.alarms.queue routing_key=scada.tms.alarms \
   >/dev/null 2>&1 \
   && ok "binding declared (or already existed)" \
@@ -237,8 +315,27 @@ kubectl -n scada exec deploy/rabbitmq -- \
 
 # ── 11. Apply Connect + register connectors ─────────────────────────────
 log "Applying connect/k8s manifests"
-kubectl apply -f "$SCRIPT_DIR/connect/k8s/10-secret.yaml"
-kubectl apply -f "$SCRIPT_DIR/connect/k8s/20-configmap.yaml"
+
+# connect-secret from env vars (overrides the static yaml). In dev this
+# matches the original values; in prod this carries the client's real
+# Artemis credentials.
+kubectl -n pinkline create secret generic connect-secret \
+  --from-literal=ARTEMIS_USER="$ARTEMIS_USER" \
+  --from-literal=ARTEMIS_PASSWORD="$ARTEMIS_PASSWORD" \
+  --from-literal=RABBITMQ_USER="$RABBITMQ_USER" \
+  --from-literal=RABBITMQ_PASS="$RABBITMQ_PASS" \
+  --from-literal=MQTT_USER="$MQTT_USER" \
+  --from-literal=MQTT_PASS="$MQTT_PASS" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# connect-configmap with broker URL substituted. The yaml has
+# tcp://host.minikube.internal:61616 hardcoded (×5 connectors); sed
+# rewrites those to $ARTEMIS_BROKER_URL before apply.
+sed "s|tcp://host.minikube.internal:61616|${ARTEMIS_BROKER_URL}|g" \
+  "$SCRIPT_DIR/connect/k8s/20-configmap.yaml" \
+  | kubectl apply -f -
+ok "connect-configmap applied with ARTEMIS_BROKER_URL=$ARTEMIS_BROKER_URL"
+
 kubectl apply -f "$SCRIPT_DIR/connect/k8s/30-deployment.yaml"
 # Restart so a force-loaded connect image rolls into the running pod.
 kubectl -n pinkline rollout restart deploy/kafka-connect 2>/dev/null || true
@@ -292,7 +389,12 @@ ok "Demo applied"
 # `|| true` swallows that so re-runs are safe. Set CREATE_VIEWERS=0 to skip.
 #
 # See QUEUES-AND-TOPICS.md §6 for full details.
-if [ "${CREATE_VIEWERS:-1}" = "1" ]; then
+if [ "$SKIP_ARTEMIS" = "1" ]; then
+  warn "SKIP_ARTEMIS=1 — skipped viewer-queue creation (no local artemis container)."
+  warn "If you want browsable queues against the remote Artemis, run the"
+  warn "create commands from QUEUES-AND-TOPICS.md §6 against the client broker"
+  warn "(e.g. via kubectl exec into a connect pod and use ./artemis CLI with --url tcp://<remote>:61616)."
+elif [ "${CREATE_VIEWERS:-1}" = "1" ]; then
   log "Creating Artemis viewer queues (idempotent)"
   declare -A VIEWERS=(
     [scada-tms-viewer]=SCADA.TMS.Alarms
@@ -371,7 +473,36 @@ else
 fi
 
 log "Access URLs"
-cat <<EOF
+if [ "$IS_PROD" = "1" ]; then
+  cat <<EOF
+
+  PROD MODE — Artemis is on a remote host, NOT localhost:8161.
+  Effective config:
+    ARTEMIS_BROKER_URL = $ARTEMIS_BROKER_URL
+    ARTEMIS_USER       = $ARTEMIS_USER
+    SKIP_ARTEMIS       = $SKIP_ARTEMIS
+
+  Local cluster URLs (port-forwards still work in prod):
+
+    Health monitor    http://localhost:8080            (19-component dashboard)
+    Demo (table)      http://localhost:8090
+    Demo (flow)       http://localhost:8090/flow
+    SCADA simulator   http://localhost:8091
+    Bridge health     http://localhost:8085/actuator/health
+    Bridge messages   http://localhost:8085/api/messages
+    Kafdrop           http://localhost:9000
+    Connect REST      http://localhost:8083/connectors?expand=status
+    RabbitMQ admin    http://localhost:15672            ($RABBITMQ_USER / $RABBITMQ_PASS)
+
+  Artemis console:    use the client-provided URL (NOT localhost:8161)
+
+  Verify Artemis reachability from inside the cluster:
+    kubectl -n pinkline run -i --rm tcptest --image=busybox --restart=Never -- \\
+      sh -c "nc -vz \$(echo $ARTEMIS_BROKER_URL | sed 's|tcp://||;s|:.*||') \\
+                  \$(echo $ARTEMIS_BROKER_URL | sed 's|.*:||')"
+EOF
+else
+  cat <<EOF
 
   Open these in your browser:
 
@@ -392,6 +523,7 @@ cat <<EOF
   See QUEUES-AND-TOPICS.md for the full list.
 
 EOF
+fi
 ok "Stack is up."
 ok "Tear down with: bash \"$SCRIPT_DIR/stop.sh\""
 ok "  or fully wipe: kubectl delete ns pinkline scada && docker compose -f \"$MESSAGING_INFRA/docker-compose.yml\" down && minikube delete"
