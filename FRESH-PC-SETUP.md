@@ -275,16 +275,30 @@ and re-run that single line from Step 7.5.
 
 ## 10 · Troubleshooting reference
 
+> For deeper diagnostic commands (connector status, Kafka offsets,
+> RabbitMQ queue+binding checks, DLQ inspection, Artemis routing counts),
+> see [`MORNING-START.md`](./MORNING-START.md) → "Diagnostic commands —
+> when something looks broken".
+
 ### Show everything's state at once
 ```bash
 kubectl -n pinkline get pods
 kubectl -n scada get pods
 docker ps --filter name=artemis
-curl -s localhost:8083/connectors?expand=status \
+kubectl -n pinkline exec deploy/kafka-connect -- \
+  curl -s http://localhost:8083/connectors?expand=status \
   | jq 'to_entries[] | {name:.key, state:.value.status.connector.state}'
 curl -s localhost:8085/actuator/health
 curl -s localhost:8091/api/status
 ```
+
+### "I can't see messages in Artemis console"
+Multicast topics (TMS.PISInfo, SCADA.TMS.Alarms) discard messages when no
+subscriber is connected — JMS pub/sub semantics, not a bug. To see
+messages, use **Kafdrop** at http://localhost:9000 → topics
+`scada.tms.processed` (reverse) or `tms.scada.encrypted` (forward).
+Full explanation in [`MORNING-START.md`](./MORNING-START.md) →
+"Where to actually SEE message flow".
 
 ### Restart one piece after a code change
 

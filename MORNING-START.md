@@ -136,8 +136,165 @@ morning when you re-run Step 2.
 | Port-forward log shows "connection refused" | The pod restarted while the forward was open. Close that minimized window and re-run that single line from Step 5. |
 | Artemis container missing | `& 'C:\Program Files\Docker\Docker\resources\bin\docker.exe' start artemis` |
 | **Dashboard shows old UI / wrong build marker** | Leftover host docker container shadowing the port-forward. See section below. |
+| **Artemis console shows no messages on TMS.PISInfo / SCADA.TMS.Alarms** | Multicast topics drain to subscribers and discard. Use Kafdrop instead — see "Where to actually see message flow" below. |
 | Kafka pod in `Error` with `InconsistentClusterIdException` | See **Kafka cluster ID mismatch** below. |
 | Everything is wrong, nuke and restart | `& $env:USERPROFILE\minikube.exe stop` then start again |
+
+---
+
+## Where to actually SEE message flow
+
+Artemis multicast topics (`TMS.PISInfo`, `SCADA.TMS.Alarms`, etc.) accept
+messages then **discard them if no subscriber is connected** — that's
+standard JMS pub/sub semantics, not a bug. The Artemis console will look
+empty even when 10,000+ messages have flowed through.
+
+For audit / message inspection, use Kafka topics — they persist for 7 days:
+
+| Direction | Where to look | Topic |
+|---|---|---|
+| TMS → SCADA forward (raw XML in) | Kafdrop http://localhost:9000 | `tms.raw` |
+| TMS → SCADA forward (encrypted out) | Kafdrop | `tms.scada.encrypted` |
+| SCADA → TMS reverse (raw JSON in) | Kafdrop | `scada.tms.raw` |
+| SCADA → TMS reverse (processed out) | Kafdrop | `scada.tms.processed` |
+| Live MQTT stream | MQTT Explorer → `localhost:1883` | `scada/tms/alarms`, `tms/scada/pas` |
+| Last 100 decrypted forward msgs | http://localhost:8091/api/received | (HTTP JSON) |
+
+To prove data is reaching Artemis (even though you can't browse the topic):
+- Artemis console → click address → **More ▾** → Statistics — look at
+  `messagesRoutedCount`. If it's incrementing, messages are arriving and
+  being routed (then dropped because no subscriber).
+
+---
+
+## Diagnostic commands — when something looks broken
+
+Copy-paste these into Git Bash (or PowerShell) to see the full system state.
+
+### 1 · Are all connectors RUNNING?
+
+```bash
+kubectl -n pinkline exec deploy/kafka-connect -- \
+  curl -s http://localhost:8083/connectors?expand=status \
+  | jq 'to_entries[] | {name:.key, state:.value.status.connector.state, tasks:[.value.status.tasks[].state]}'
+```
+
+Expect 7 entries, all `RUNNING`. If any shows `FAILED`:
+```bash
+kubectl -n pinkline exec deploy/kafka-connect -- \
+  curl -s http://localhost:8083/connectors/<name>/status | jq
+# To restart it:
+kubectl -n pinkline exec deploy/kafka-connect -- \
+  curl -X POST http://localhost:8083/connectors/<name>/restart
+```
+
+### 2 · How many messages are in each Kafka topic?
+
+```bash
+kubectl -n pinkline exec deploy/kafka -- bash -c "
+for t in tms.raw tms.scada.encrypted scada.tms.raw scada.tms.processed; do
+  echo -n \"\$t: \"
+  kafka-run-class kafka.tools.GetOffsetShell --broker-list kafka-service:9092 --topic \$t 2>/dev/null \
+    | awk -F: '{s+=\$3} END{print s+0}'
+done"
+```
+
+Numbers should be increasing on each re-run. If `scada.tms.raw` is stuck
+at 0, the SCADA → TMS path is broken upstream of Kafka (RabbitMQ queue
+or source connector).
+
+### 3 · Are RabbitMQ queue + binding declared?
+
+```bash
+kubectl -n scada exec deploy/rabbitmq -- \
+  rabbitmqctl list_queues name messages messages_ready consumers \
+  | grep -E "scada|name"
+```
+
+Expect `scada.tms.alarms.queue` to exist with `consumers ≥ 1`.
+0 consumers = the source connector isn't connected → restart it.
+
+```bash
+kubectl -n scada exec deploy/rabbitmq -- rabbitmqctl list_bindings | grep scada.tms.alarms
+```
+
+Expect a row: `amq.topic → scada.tms.alarms.queue → scada.tms.alarms`.
+If missing, declare it:
+```bash
+kubectl -n scada exec deploy/rabbitmq -- \
+  rabbitmqadmin --username=thiru --password=password \
+    declare queue name=scada.tms.alarms.queue durable=true auto_delete=false
+kubectl -n scada exec deploy/rabbitmq -- \
+  rabbitmqadmin --username=thiru --password=password \
+    declare binding source=amq.topic destination=scada.tms.alarms.queue routing_key=scada.tms.alarms
+```
+
+### 4 · Which mode is the bridge in?
+
+```bash
+kubectl -n pinkline exec deploy/pas-scada-bridge -- env | grep -E "BRIDGE_REVERSE|BRIDGE_INPUT" | sort
+```
+
+| Output | Mode |
+|---|---|
+| `BRIDGE_INPUT_FROM_KAFKA=true` + `BRIDGE_REVERSE_KAFKA_ENABLED=true` | Mode B (Connect-driven) |
+| Both `false` (or missing) | Mode A (Camel-direct) |
+
+Mode determines which Camel routes are active. See `WORKFLOW.md` §5.
+
+### 5 · Is the bridge actively processing?
+
+```bash
+kubectl -n pinkline logs deploy/pas-scada-bridge --tail 50 \
+  | grep -iE "reverse|inbound|kafka source"
+```
+
+Expect repeating pairs of `← Kafka reverse [scada.tms.raw]` and
+`→ Kafka reverse [scada.tms.processed]` — that's the reverse path
+running. Forward path: `← Kafka source [tms.raw]` and `→ Kafka [tms.scada.encrypted]`.
+
+### 6 · Are any messages in the DLQs?
+
+```bash
+# Camel DLQ (Artemis)
+kubectl -n pinkline exec deploy/kafka -- bash -c "
+for t in dlq.connect.tms-artemis-source dlq.connect.tms-rabbitmq-sink \
+         dlq.connect.scada-rabbitmq-source dlq.connect.scada-artemis-sink; do
+  echo -n \"\$t: \"
+  kafka-run-class kafka.tools.GetOffsetShell --broker-list kafka-service:9092 --topic \$t 2>/dev/null \
+    | awk -F: '{s+=\$3} END{print s+0}'
+done"
+```
+
+All zeros = healthy. Non-zero = messages failed; see `WORKFLOW.md` §4.4
+for how to read them.
+
+For the Camel-side DLQ in Artemis (host Docker):
+```bash
+MSYS_NO_PATHCONV=1 docker exec artemis \
+  /var/lib/artemis-instance/bin/artemis queue stat \
+  --user admin --password admin --url tcp://localhost:61616 \
+  | grep -E "NAME|DLQ"
+```
+
+Look for `DLQ.kafka-bridge` MESSAGE_COUNT > 0 → Camel forward route had
+errors. Browse them in the Artemis console.
+
+### 7 · Artemis address routing counts (proves messages reached Artemis)
+
+```bash
+MSYS_NO_PATHCONV=1 docker exec artemis \
+  /var/lib/artemis-instance/bin/artemis queue stat \
+  --user admin --password admin --url tcp://localhost:61616 \
+  | grep -E "NAME|TMS|SCADA"
+```
+
+Look at `MESSAGES_ADDED` — that's the running count of how many messages
+have ever been routed to that address. It should match (roughly) the
+Kafka topic offset on the upstream side.
+
+If `SCADA.TMS.Alarms` doesn't appear in the list, no messages have ever
+been published to it (sink connector hasn't connected, or is FAILED).
 
 ---
 
