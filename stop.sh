@@ -26,6 +26,23 @@ log()  { printf '\n\033[1;36m▶ %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m  ✓ %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m  ! %s\033[0m\n' "$*"; }
 
+# Resolve the real minikube binary — same pattern as start.sh, dodges
+# the non-executable stub at C:\WINDOWS\system32\minikube on Windows.
+MINIKUBE=""
+if [ -n "${USERPROFILE:-}" ] && [ -x "${USERPROFILE}/minikube.exe" ]; then
+  MINIKUBE="${USERPROFILE}/minikube.exe"
+elif [ -n "${HOME:-}" ] && [ -x "${HOME}/minikube.exe" ]; then
+  MINIKUBE="${HOME}/minikube.exe"
+elif command -v minikube.exe >/dev/null 2>&1; then
+  MINIKUBE="$(command -v minikube.exe)"
+elif command -v minikube >/dev/null 2>&1; then
+  CAND="$(command -v minikube)"
+  if [ -x "$CAND" ] && [ -s "$CAND" ]; then
+    MINIKUBE="$CAND"
+  fi
+fi
+minikube() { [ -n "$MINIKUBE" ] && "$MINIKUBE" "$@" || command minikube "$@"; }
+
 DO_PODS=0; DO_ARTEMIS=0; DO_MINIKUBE=0; DO_WIPE=0
 for arg in "$@"; do
   case "$arg" in
